@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Atomically replace a verified regular file with the given content.
+# Usage: write-config <file> <content>
+# The file must already exist as a regular file (never a symlink); the
+# parent directory must exist and not be a symlink. Content is capped at
+# 1 MiB. Writes to a temp file in the same directory, then renames.
+set -euo pipefail
+
+file="${1:?file required}"
+content="${2:?content required}"
+
+[[ "$file" == /* ]] || exit 1
+[[ "${#content}" -le 1048576 ]] || exit 1
+dir="${file%/*}"
+[[ "$dir" == /* ]] || exit 1
+[[ -d "$dir" ]] || exit 1
+[[ ! -L "$dir" ]] || exit 1
+exec /usr/bin/python3 - "$file" "$content" <<'EOF'
+import os
+import stat as statmod
+import sys
+import tempfile
+
+path, content = sys.argv[1], sys.argv[2]
+try:
+    fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
+except OSError:
+    sys.exit(1)
+try:
+    st = os.fstat(fd)
+    if not statmod.S_ISREG(st.st_mode):
+        sys.exit(1)
+    mode = statmod.S_IMODE(st.st_mode)
+finally:
+    os.close(fd)
+
+directory = os.path.dirname(path)
+fd, tmp = tempfile.mkstemp(prefix=".write-config-", dir=directory)
+try:
+    with os.fdopen(fd, "w") as f:
+        f.write(content)
+        f.flush()
+        os.fsync(f.fileno())
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+except OSError:
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+    sys.exit(1)
+EOF
