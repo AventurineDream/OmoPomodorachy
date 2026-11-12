@@ -167,27 +167,45 @@ function parseDurations(tomlText) {
 // Values are clamped to their slider ranges. Returns the updated text,
 // or null when the active preset or a duration key is missing, or a
 // value is not a number — so the caller never writes a broken file.
+// Rewrite the active preset's durations in the TOML text, keeping
+// everything else byte-for-byte (comments, order, the other presets).
+// Only a key whose desired value differs from the file's current value
+// for it is rewritten — a preset value outside the slider range (a
+// 120-minute deep-work block, a 2-minute long break) is left alone until
+// she actually moves that slider, so moving a different slider never
+// quietly rewrites it. A rewritten value is clamped to its slider range.
+// Returns the updated text, or null when the active preset or a duration
+// key is missing, or a value is not a number — so the caller never writes
+// a broken file.
 function updateDurations(tomlText, work, shortBreak, longBreak) {
   var text = String(tomlText || "")
   var parsed = parseDurations(text)
   if (!parsed) return null
-  var w = clampDuration("work", work)
-  var s = clampDuration("shortBreak", shortBreak)
-  var l = clampDuration("longBreak", longBreak)
-  if (w === null || s === null || l === null) return null
+  var w = Number(work)
+  var s = Number(shortBreak)
+  var l = Number(longBreak)
+  if (!isFinite(w) || !isFinite(s) || !isFinite(l)) return null
   var section = presetSection(text, parsed.preset)
   if (!section) return null
   var body = text.slice(section.start, section.end)
-  // True when the key was found (even when the value is already what we
-  // want, so the text does not change); false when the key is missing.
-  function replace(key, value) {
+  var changes = [
+    ["work_minutes", "work", w, parsed.work],
+    ["short_break_minutes", "shortBreak", s, parsed.shortBreak],
+    ["long_break_minutes", "longBreak", l, parsed.longBreak],
+  ]
+  for (var i = 0; i < changes.length; i++) {
+    var key = changes[i][0]
+    var kind = changes[i][1]
+    var desired = changes[i][2]
+    var current = changes[i][3]
+    if (desired === current) continue
+    var clamped = clampDuration(kind, desired)
+    if (clamped === null) return null
     var re = new RegExp("^(\\s*" + key + "\\s*=\\s*)[0-9]+", "m")
     var matched = false
-    body = body.replace(re, function (m, p1) { matched = true; return p1 + value })
-    return matched
+    body = body.replace(re, function (m, p1) { matched = true; return p1 + clamped })
+    if (!matched) return null
   }
-  if (!replace("work_minutes", w) || !replace("short_break_minutes", s) || !replace("long_break_minutes", l))
-    return null
   return text.slice(0, section.start) + body + text.slice(section.end)
 }
 // on the first poll where the break is running. launchedFor is the session
@@ -196,6 +214,30 @@ function updateDurations(tomlText, work, shortBreak, longBreak) {
 // pause/resume mid-break does not relaunch. minutes is the break's
 // remaining time in whole minutes; 0 means unknown, so no launch. An
 // empty breakPattern turns the link off.
+// ---- Rounds before stop (Phase 4) ----
+// A run is a sequence of work sessions. `rounds` (0 = off, unlimited) is
+// how many work sessions run before the timer stops. The count is
+// in-memory: it resets when a run completes or the daemon restarts.
+
+// Rounds, clamped to 0 (off) .. 12. Null when the value is not a number.
+function clampRounds(value) {
+  var n = Number(value)
+  if (!isFinite(n)) return null
+  return Math.max(0, Math.min(12, Math.round(n)))
+}
+
+// True when a work session ended into a break — the same edge as the
+// chime, restricted to work. A skipped work session counts (the chime
+// treats a skip as a session change too).
+function workSessionEnded(prevSession, prevStatus, nextSession) {
+  return sessionEnded(prevSession, prevStatus, nextSession) && prevSession === "work" && isBreakSession(nextSession)
+}
+
+// True when the run has reached its round limit (rounds 0 means off).
+function shouldStopAfterRound(rounds, roundsCompleted) {
+  return rounds > 0 && roundsCompleted >= rounds
+}
+
 function shouldLaunchBreather(sessionKey, status, launchedFor, breakPattern, minutes) {
   if (!breakPattern) return false
   if (!isBreakSession(sessionKey)) return false

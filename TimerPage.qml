@@ -154,6 +154,15 @@ Item {
           }
         }
       }
+
+      Text {
+        visible: root.timerService ? root.timerService.rounds > 0 : false
+        text: root.timerService ? ("Rounds: " + root.timerService.roundsCompleted + " / " + root.timerService.rounds + " done") : ""
+        color: root.foreground
+        opacity: 0.6
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
     }
 
     Row {
