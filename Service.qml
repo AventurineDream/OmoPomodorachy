@@ -189,12 +189,6 @@ Item {
   readonly property string writeScriptPath: Qt.resolvedUrl("write-config").toString().replace(/^file:\/\//, "")
   readonly property string focusdConfigPath: Quickshell.env("HOME") + "/.config/focusd/config.toml"
   readonly property string focusdJsonPath: Quickshell.env("HOME") + "/.config/omarchy/focusd.json"
-  // A Rounds slider release waiting on a fresh focusd.json re-read.
-  // Only the rounds key is written, on top of that fresh text — the
-  // cached text can be up to 10s old, so writing from it could
-  // overwrite a hand edit made in that window.
-  property bool pendingRoundsWrite: false
-  property int pendingRoundsValue: 0
   property string configRaw: ""
   property bool configApplied: false
 
@@ -220,23 +214,6 @@ Item {
 
   function applyConfig(ok, raw) {
     var next = ok ? String(raw || "") : "";
-    if (root.pendingRoundsWrite) {
-      // A Rounds slider release is waiting on this fresh read. Only the
-      // rounds key is written, on top of the fresh text — a hand edit to
-      // another key inside the poll window must not be written back over.
-      // If the read failed, write nothing; the next poll snaps the
-      // slider back. A write that changes nothing is skipped.
-      var value = root.pendingRoundsValue;
-      root.pendingRoundsWrite = false;
-      if (ok) {
-        var updated = Model.setJsonKey(next, "rounds", value);
-        if (updated !== next) {
-          root.configRaw = updated;
-          Quickshell.execDetached(["bash", root.writeScriptPath, "--create", root.focusdJsonPath, updated]);
-        }
-      }
-      return;
-    }
     if (next === root.configRaw && root.configApplied)
       return;
     root.configRaw = next;
@@ -245,20 +222,26 @@ Item {
     root.configure();
   }
 
-  // A Rounds slider release re-reads focusd.json fresh, then writes
-  // only the rounds key on top of that fresh text (in applyConfig).
-  // The cached text can be up to 10s old, so writing from it could
-  // overwrite a hand edit made in that window. The 10s poll re-reads
-  // the file and confirms the write; if it failed, the slider snaps back
-  // to the file's value.
+  // A Rounds slider release writes only the rounds key to focusd.json,
+  // built from the last-read config so the other keys are kept. The
+  // file is written only by this plugin (and a hand edit), so there is
+  // no programmatic writer to race the way the focusd TUI races
+  // config.toml — a direct write from the cached config is safe here.
+  // The 10s poll re-reads the file and confirms the write; if it
+  // failed, the slider snaps back to the file's value.
   function writeRounds(value) {
     var v = Model.clampRounds(value);
     if (v === null)
       return;
     root.rounds = v;
-    root.pendingRoundsValue = v;
-    root.pendingRoundsWrite = true;
-    root.loadConfig();
+    var cfg = root.fileConfig || {};
+    // Skip the write when the file already has this value (e.g. the
+    // slider was released without moving).
+    if (cfg.rounds === v)
+      return;
+    var updated = Model.setJsonKey(JSON.stringify(cfg), "rounds", v);
+    root.configRaw = updated;
+    Quickshell.execDetached(["bash", root.writeScriptPath, "--create", root.focusdJsonPath, updated]);
   }
 
   Timer {
