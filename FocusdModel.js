@@ -358,3 +358,38 @@ function nextTag(tags, currentTag) {
   return list[(idx + 1) % list.length]
 }
 
+
+// ---- Rounds setting (GUI) ----
+// Set one key in a JSON settings file. Parses the text (an empty or
+// invalid file starts fresh with just this key) and returns the JSON,
+// 2-space indented so a hand-edited file stays readable. All other
+// keys are kept as-is. Used by the panel's Rounds slider to write the
+// `rounds` limit back to focusd.json.
+function setJsonKey(text, key, value) {
+  var obj = {}
+  var raw = String(text || "").trim()
+  if (raw) {
+    try { obj = JSON.parse(raw) || {} } catch (e) { obj = {} }
+  }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) obj = {}
+  obj[String(key)] = value
+  return JSON.stringify(obj, null, 2) + "\n"
+}
+
+// ---- Config write guard ----
+// True when a focusd.json text is safe to write back from: empty (no
+// file yet, nothing to lose) or a valid JSON object. An invalid file,
+// or a valid JSON value that is not an object, parses to {} — writing
+// from that would wipe the other keys (sounds, breakPattern, tags...).
+// The Service sets its configOk flag from this after each read, and
+// writeRounds refuses to write while it is false.
+function configTextOk(text) {
+  var raw = String(text || "").trim()
+  if (!raw) return true
+  try {
+    var parsed = JSON.parse(raw)
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+  } catch (e) {
+    return false
+  }
+}

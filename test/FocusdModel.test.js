@@ -6,7 +6,7 @@ const os = require("os");
 const { execFileSync } = require("child_process");
 const src = fs.readFileSync(path.join(__dirname, "..", "FocusdModel.js"), "utf8");
 const factory = new Function(
-  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, updateDuration, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag };"
+  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, updateDuration, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, setJsonKey, configTextOk };"
 );
 const M = factory();
 
@@ -275,5 +275,21 @@ check("nextTag: cycles forward", M.nextTag(["Work", "Study", "Art"], "Work") ===
 check("nextTag: wraps around", M.nextTag(["Work", "Study", "Art"], "Art") === "Work");
 check("nextTag: an unknown tag starts at the first", M.nextTag(["Work", "Study", "Art"], "Other") === "Work");
 check("nextTag: an empty list is empty", M.nextTag([], "Work") === "");
+
+// --- Rounds setting (GUI) ---
+check("setJsonKey: sets a key in existing JSON", JSON.parse(M.setJsonKey('{"rounds": 0, "tags": ["Work"]}', "rounds", 4)).rounds === 4);
+check("setJsonKey: keeps the other keys", JSON.parse(M.setJsonKey('{"rounds": 0, "tags": ["Work"]}', "rounds", 4)).tags[0] === "Work");
+check("setJsonKey: an empty file starts fresh", JSON.parse(M.setJsonKey("", "rounds", 4)).rounds === 4);
+check("setJsonKey: an invalid file starts fresh", JSON.parse(M.setJsonKey("{oops", "rounds", 4)).rounds === 4);
+check("setJsonKey: output is indented JSON", M.setJsonKey("", "rounds", 4).indexOf('\n  "rounds": 4') !== -1);
+
+// --- Config write guard ---
+check("configTextOk: empty text is safe (no file yet)", M.configTextOk("") === true);
+check("configTextOk: whitespace-only is safe", M.configTextOk("  \n ") === true);
+check("configTextOk: a valid object is safe", M.configTextOk('{"rounds": 4}') === true);
+check("configTextOk: invalid JSON is not safe", M.configTextOk("{oops") === false);
+check("configTextOk: a JSON array is not safe", M.configTextOk('[1, 2]') === false);
+check("configTextOk: a JSON string is not safe", M.configTextOk('"hello"') === false);
+check("configTextOk: truncated JSON is not safe", M.configTextOk('{"rounds": 4') === false);
 
 console.log(`FocusdModel tests: ${pass} passed${process.exitCode ? " (WITH FAILURES)" : ""}`);
