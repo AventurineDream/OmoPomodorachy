@@ -51,7 +51,12 @@ Item {
   // A slider release is waiting on a fresh re-read of the TOML. The
   // cached text can be up to 10s old, and a change made in the focusd
   // TUI inside that window would be overwritten if the write used it.
+  // Only the released slider's key is written (pendingWriteKind/Value) —
+  // the other sliders may hold stale values, and passing those in would
+  // write them back over a TUI change to a different key.
   property bool pendingWrite: false
+  property string pendingWriteKind: ""
+  property int pendingWriteValue: 0
 
   property int sessionsToday: 0
   property string focusedToday: "0s"
@@ -188,14 +193,20 @@ Item {
   function applyDurations(ok, raw) {
     var next = ok ? String(raw || "") : "";
     if (root.pendingWrite) {
-      // A slider release is waiting on this fresh read. Use the fresh
-      // text only as the base for the write — do not let it overwrite the
-      // slider's values (they are newer than the file). If the read
-      // failed, write nothing; the next poll snaps the sliders back.
+      // A slider release is waiting on this fresh read. Only the released
+      // slider's key is written, on top of the fresh text — the other
+      // sliders may hold stale values (a change made in the focusd TUI
+      // inside the poll window), and passing those in would write them
+      // back over the TUI change. If the read failed, write nothing; the
+      // next poll snaps the sliders back. A write that changes nothing is
+      // skipped.
+      var kind = root.pendingWriteKind;
+      var value = root.pendingWriteValue;
       root.pendingWrite = false;
+      root.pendingWriteKind = "";
       if (ok) {
-        var updated = Model.updateDurations(next, root.workMinutes, root.shortBreakMinutes, root.longBreakMinutes);
-        if (updated !== null) {
+        var updated = Model.updateDuration(next, kind, value);
+        if (updated !== null && updated !== next) {
           root.durationsRaw = updated;
           // Run through bash explicitly: the script's executable bit does
           // not survive a push through the GitHub API, and bash reads it
@@ -218,13 +229,22 @@ Item {
     root.longBreakMinutes = parsed.longBreak;
   }
 
-  // A slider release re-reads config.toml fresh, then writes the new
-  // durations on top of that fresh text (in applyDurations). The cached
-  // text can be up to 10s old, so writing from it could overwrite a
-  // change made in the focusd TUI in that window. The 10s poll re-reads
-  // the file and confirms the write; if it failed, the sliders snap back
-  // to the file's values.
-  function writeDurations() {
+  // A slider release re-reads config.toml fresh, then writes only the
+  // released slider's key on top of that fresh text (in applyDurations).
+  // The cached text can be up to 10s old, so writing from it could
+  // overwrite a change made in the focusd TUI in that window — and the
+  // other sliders still hold their (now stale) values, so only the
+  // released key is ever passed in. The 10s poll re-reads the file and
+  // confirms the write; if it failed, the sliders snap back to the
+  // file's values.
+  function writeDurations(kind, value) {
+    var v = Math.round(Number(value));
+    if (kind === "work") root.workMinutes = v;
+    else if (kind === "shortBreak") root.shortBreakMinutes = v;
+    else if (kind === "longBreak") root.longBreakMinutes = v;
+    else return;
+    root.pendingWriteKind = kind;
+    root.pendingWriteValue = v;
     root.pendingWrite = true;
     root.loadDurations();
   }
