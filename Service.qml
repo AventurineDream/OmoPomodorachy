@@ -32,8 +32,11 @@ Item {
   property string soundFile: Model.DEFAULT_SOUND
   // Breather link. breakPattern is the pattern the Breather opens with
   // when a break starts ("box" by default); an empty pattern turns the
-  // link off. Set in configure() from ~/.config/omarchy/focusd.json.
+  // link off. breatherLaunchedFor is the session key the Breather already
+  // launched for, so a break launches once; it clears when a work session
+  // starts. Set in configure() from ~/.config/omarchy/focusd.json.
   property string breakPattern: "box"
+  property string breatherLaunchedFor: ""
 
   property int sessionsToday: 0
   property string focusedToday: "0s"
@@ -310,12 +313,21 @@ Item {
     // never chimes either.
     if (Model.shouldChime(root.prevSession, root.prevStatus, sessionKey, root.soundsEnabled))
       Quickshell.execDetached(Model.chimeCommand(Model.resolveSoundFile(root.soundFile)));
-    // A break starting launches the Breather with her chosen pattern, for
-    // the break's remaining time (state.text, the status's remaining-time
-    // field at the transition). Same edge as the chime — only a session
-    // that was running ending into a break — and only when a pattern is set.
-    if (root.breakPattern && Model.sessionEnded(root.prevSession, root.prevStatus, sessionKey) && Model.isBreakSession(sessionKey))
-      Quickshell.execDetached(Model.breatherCommand(root.breakPattern, Model.parseMinutes(state.text)));
+    // Breather link: launch once per break, on the first poll where the
+    // break is running. A break that starts paused does not launch until
+    // the user resumes it; pause/resume mid-break does not relaunch. The
+    // launch key clears when a work session starts, so the next break of
+    // the same kind launches again. (The chime above stays on the
+    // session-ended edge; the Breather has its own rule.)
+    if (sessionKey === "work") {
+      root.breatherLaunchedFor = "";
+    } else {
+      var breakMinutes = Model.parseMinutes(state.text);
+      if (Model.shouldLaunchBreather(sessionKey, newStatus, root.breatherLaunchedFor, root.breakPattern, breakMinutes)) {
+        root.breatherLaunchedFor = sessionKey;
+        Quickshell.execDetached(Model.breatherCommand(root.breakPattern, breakMinutes));
+      }
+    }
     root.prevSession = sessionKey;
     root.prevStatus = newStatus;
     root.status = newStatus;
