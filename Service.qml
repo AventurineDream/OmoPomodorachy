@@ -320,10 +320,14 @@ Item {
   // category and rewrite the log. Nothing to fix when no block has
   // completed yet.
   function cycleLastTag() {
+    // TEMP DEBUG — remove before merge.
+    console.log("Focusd DEBUG cycleLastTag: last=" + JSON.stringify(root.lastWorkSession) + " sessionsRawLen=" + root.sessionsRaw.length + " tags=" + JSON.stringify(root.tags));
     if (!root.lastWorkSession)
       return;
     var next = Model.nextTag(root.tags, root.lastWorkSession.tag);
     var logText = Model.retagSessionLog(root.sessionsRaw, next);
+    // TEMP DEBUG — remove before merge.
+    console.log("Focusd DEBUG cycleLastTag: next=" + next + " logText=" + (logText === null ? "null" : logText));
     if (logText === null)
       return;
     root.sessionsRaw = logText;
