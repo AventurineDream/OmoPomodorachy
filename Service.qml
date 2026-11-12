@@ -48,6 +48,18 @@ Item {
   property int longBreakMinutes: 15
   property string durationsRaw: ""
   property bool durationsApplied: false
+  // A slider release is waiting on a fresh re-read of the TOML. The
+  // cached text can be up to 10s old, and a change made in the focusd
+  // TUI inside that window would be overwritten if the write used it.
+  property bool pendingWrite: false
+
+  // Rounds before stop (Phase 4). `rounds` is how many work sessions run
+  // before the timer stops (0 = off, unlimited); `roundsCompleted` is how
+  // many work sessions this run has finished. The count is in-memory and
+  // resets when a run completes or the daemon restarts. Set in
+  // configure() from ~/.config/omarchy/focusd.json.
+  property int rounds: 0
+  property int roundsCompleted: 0
 
   property int sessionsToday: 0
   property string focusedToday: "0s"
@@ -101,6 +113,11 @@ Item {
     // empty pattern turns the link off. "box" is the default.
     var bp = root.fileConfig && root.fileConfig.breakPattern;
     root.breakPattern = (bp === undefined || bp === null) ? "box" : String(bp);
+    // Rounds before stop: how many work sessions run before the timer
+    // stops. 0 (the default) means off — run without a limit.
+    var r = root.fileConfig && root.fileConfig.rounds;
+    var clamped = (r === undefined || r === null) ? 0 : Model.clampRounds(r);
+    root.rounds = clamped === null ? 0 : clamped;
   }
   property var fileConfig: ({})
   function parseFileConfig(raw) {
@@ -183,6 +200,24 @@ Item {
 
   function applyDurations(ok, raw) {
     var next = ok ? String(raw || "") : "";
+    if (root.pendingWrite) {
+      // A slider release is waiting on this fresh read. Use the fresh
+      // text only as the base for the write — do not let it overwrite the
+      // slider's values (they are newer than the file). If the read
+      // failed, write nothing; the next poll snaps the sliders back.
+      root.pendingWrite = false;
+      if (ok) {
+        var updated = Model.updateDurations(next, root.workMinutes, root.shortBreakMinutes, root.longBreakMinutes);
+        if (updated !== null) {
+          root.durationsRaw = updated;
+          // Run through bash explicitly: the script's executable bit does
+          // not survive a push through the GitHub API, and bash reads it
+          // either way.
+          Quickshell.execDetached(["bash", root.writeScriptPath, root.focusdConfigPath, updated]);
+        }
+      }
+      return;
+    }
     if (next === root.durationsRaw && root.durationsApplied)
       return;
     root.durationsRaw = next;
@@ -196,19 +231,15 @@ Item {
     root.longBreakMinutes = parsed.longBreak;
   }
 
-  // Write the current slider durations to the active preset in
-  // config.toml. The 10s poll re-reads the file and confirms the write;
-  // if it failed, the sliders snap back to the file's values.
+  // A slider release re-reads config.toml fresh, then writes the new
+  // durations on top of that fresh text (in applyDurations). The cached
+  // text can be up to 10s old, so writing from it could overwrite a
+  // change made in the focusd TUI in that window. The 10s poll re-reads
+  // the file and confirms the write; if it failed, the sliders snap back
+  // to the file's values.
   function writeDurations() {
-    if (!root.durationsRaw)
-      return;
-    var next = Model.updateDurations(root.durationsRaw, root.workMinutes, root.shortBreakMinutes, root.longBreakMinutes);
-    if (next === null)
-      return;
-    root.durationsRaw = next;
-    // Run through bash explicitly: the script's executable bit does not
-    // survive a push through the GitHub API, and bash reads it either way.
-    Quickshell.execDetached(["bash", root.writeScriptPath, root.focusdConfigPath, next]);
+    root.pendingWrite = true;
+    root.loadDurations();
   }
 
   Timer {
@@ -411,9 +442,10 @@ Item {
       status = "stopped";
       // No timer to chime from: clear the previous session so the next
       // session the daemon reports (it restarts as Work) reads as a first
-      // poll, not as a session ending.
+      // poll, not as a session ending. The run is over too.
       root.prevSession = "";
       root.prevStatus = "";
+      root.roundsCompleted = 0;
       return;
     }
     var state = {};
@@ -424,6 +456,7 @@ Item {
       status = "stopped";
       root.prevSession = "";
       root.prevStatus = "";
+      root.roundsCompleted = 0;
       return;
     }
     var classes = state.class || [];
@@ -438,6 +471,21 @@ Item {
     // never chimes either.
     if (Model.shouldChime(root.prevSession, root.prevStatus, sessionKey, root.soundsEnabled))
       Quickshell.execDetached(Model.chimeCommand(Model.resolveSoundFile(root.soundFile)));
+    // Rounds: a work session ending into a break completes a round. When
+    // the run reaches the configured number of rounds, stop the timer
+    // (reset the break to paused) and start a fresh run. The Breather is
+    // not launched for the break that ends the run — it would count down
+    // while the break sits paused; resuming the break launches it instead.
+    // (The chime above still fires: the work session did end.)
+    var runEnded = false;
+    if (Model.workSessionEnded(root.prevSession, root.prevStatus, sessionKey)) {
+      root.roundsCompleted += 1;
+      if (Model.shouldStopAfterRound(root.rounds, root.roundsCompleted)) {
+        runEnded = true;
+        root.roundsCompleted = 0;
+        Quickshell.execDetached(["focusd", "reset"]);
+      }
+    }
     // Breather link: launch once per break, on the first poll where the
     // break is running. A break that starts paused does not launch until
     // the user resumes it; pause/resume mid-break does not relaunch. The
@@ -446,7 +494,7 @@ Item {
     // session-ended edge; the Breather has its own rule.)
     if (sessionKey === "work") {
       root.breatherLaunchedFor = "";
-    } else {
+    } else if (!runEnded) {
       var breakMinutes = Model.parseMinutes(state.text);
       if (Model.shouldLaunchBreather(sessionKey, newStatus, root.breatherLaunchedFor, root.breakPattern, breakMinutes)) {
         root.breatherLaunchedFor = sessionKey;
