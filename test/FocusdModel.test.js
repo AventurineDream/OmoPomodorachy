@@ -53,14 +53,26 @@ try {
 check("missing sound file exits silently", !missingThrew);
 
 // --- shouldChime ---
-check("first poll never chimes", M.shouldChime("", "work", true) === false);
-check("same session never chimes", M.shouldChime("work", "work", true) === false);
-check("work to short break chimes", M.shouldChime("work", "short-break", true) === true);
-check("short break to work chimes", M.shouldChime("short-break", "work", true) === true);
-check("work to long break chimes", M.shouldChime("work", "long-break", true) === true);
-check("long break to work chimes", M.shouldChime("long-break", "work", true) === true);
-check("sounds off never chimes", M.shouldChime("work", "short-break", false) === false);
-check("empty next session never chimes", M.shouldChime("work", "", true) === false);
-check("pause keeps the session, so no chime", M.shouldChime("work", "work", true) === false);
+check("first poll never chimes", M.shouldChime("", "", "work", true) === false);
+check("same session never chimes", M.shouldChime("work", "running", "work", true) === false);
+check("work to short break chimes", M.shouldChime("work", "running", "short-break", true) === true);
+check("short break to work chimes", M.shouldChime("short-break", "running", "work", true) === true);
+check("work to long break chimes", M.shouldChime("work", "running", "long-break", true) === true);
+check("long break to work chimes", M.shouldChime("long-break", "running", "work", true) === true);
+check("sounds off never chimes", M.shouldChime("work", "running", "short-break", false) === false);
+check("empty next session never chimes", M.shouldChime("work", "running", "", true) === false);
+check("pause keeps the session, so no chime", M.shouldChime("work", "running", "work", true) === false);
+// Stop then start: the previous poll had the session paused (stopped), so
+// starting a different session afterwards is a manual start, not a session
+// ending. This is the false chime the stopped branches guard against.
+check("stop during a break, then start work: no chime", M.shouldChime("short-break", "paused", "work", true) === false);
+check("stop during work, then start a break: no chime", M.shouldChime("work", "paused", "short-break", true) === false);
+// A daemon restart clears the previous session (the stopped branches), so
+// the timer coming back as Work reads as a first poll.
+check("daemon restart after a stop: no chime", M.shouldChime("", "", "work", true) === false);
+// Skipping while paused ends a session the user already stopped, so it
+// stays silent too; skipping while running chimes.
+check("skip while paused: no chime", M.shouldChime("work", "paused", "short-break", true) === false);
+check("skip while running: chimes", M.shouldChime("work", "running", "short-break", true) === true);
 
 console.log(`FocusdModel tests: ${pass} passed${process.exitCode ? " (WITH FAILURES)" : ""}`);

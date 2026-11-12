@@ -20,11 +20,14 @@ Item {
 
   property bool installed: false
 
-  // Session-end chime. prevSession is the session key from the previous
-  // status poll ("" until the first poll lands, so the first thing the
-  // timer reports never chimes). soundsEnabled and soundFile come from
+  // Session-end chime. prevSession/prevStatus are the session key and
+  // status from the previous status poll ("" until the first poll lands, so
+  // the first thing the timer reports never chimes; both are cleared again
+  // whenever the timer reports stopped, so a stop followed by a manual
+  // start never chimes). soundsEnabled and soundFile come from
   // ~/.config/omarchy/focusd.json via configure() below.
   property string prevSession: ""
+  property string prevStatus: ""
   property bool soundsEnabled: true
   property string soundFile: Model.DEFAULT_SOUND
 
@@ -270,6 +273,11 @@ Item {
     var text = String(raw || "").trim();
     if (!text) {
       status = "stopped";
+      // No timer to chime from: clear the previous session so the next
+      // session the daemon reports (it restarts as Work) reads as a first
+      // poll, not as a session ending.
+      root.prevSession = "";
+      root.prevStatus = "";
       return;
     }
     var state = {};
@@ -278,19 +286,24 @@ Item {
     } catch (error) {
       console.warn("Focusd: ignoring invalid state:", error);
       status = "stopped";
+      root.prevSession = "";
+      root.prevStatus = "";
       return;
     }
     var classes = state.class || [];
     var alt = String(state.alt || "work");
     var newStatus = classes.indexOf("paused") !== -1 ? "paused" : "running";
     var sessionKey = alt.replace(/-paused$/, "");
-    // A session ending is a session change: the previous session ran out
-    // (or was skipped) and the next one began. The chime fires once, on
-    // the poll that sees the change; pause and resume never change the
-    // session, so they stay silent.
-    if (Model.shouldChime(root.prevSession, sessionKey, root.soundsEnabled))
+    // A session ending is a session change out of a session that was
+    // running: the previous session ran out (or was skipped) and the next
+    // one began. The chime fires once, on the poll that sees the change.
+    // Pause and resume never change the session, so they stay silent; a
+    // stop leaves the previous status paused, so a manual start afterwards
+    // never chimes either.
+    if (Model.shouldChime(root.prevSession, root.prevStatus, sessionKey, root.soundsEnabled))
       Quickshell.execDetached(Model.chimeCommand(Model.resolveSoundFile(root.soundFile)));
     root.prevSession = sessionKey;
+    root.prevStatus = newStatus;
     root.status = newStatus;
     root.session = sessionKey;
     root.sessionLabel = sessionLabelFor(sessionKey);
