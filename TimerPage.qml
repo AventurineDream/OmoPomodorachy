@@ -301,10 +301,8 @@ Item {
         maximum: 90
         minutes: root.timerService ? root.timerService.workMinutes : 25
         onReleased: function (v) {
-          if (root.timerService) {
-            root.timerService.workMinutes = Math.round(v);
-            root.timerService.writeDurations();
-          }
+          if (root.timerService)
+            root.timerService.writeDurations("work", v);
         }
       }
 
@@ -314,10 +312,8 @@ Item {
         maximum: 30
         minutes: root.timerService ? root.timerService.shortBreakMinutes : 5
         onReleased: function (v) {
-          if (root.timerService) {
-            root.timerService.shortBreakMinutes = Math.round(v);
-            root.timerService.writeDurations();
-          }
+          if (root.timerService)
+            root.timerService.writeDurations("shortBreak", v);
         }
       }
 
@@ -327,10 +323,8 @@ Item {
         maximum: 60
         minutes: root.timerService ? root.timerService.longBreakMinutes : 15
         onReleased: function (v) {
-          if (root.timerService) {
-            root.timerService.longBreakMinutes = Math.round(v);
-            root.timerService.writeDurations();
-          }
+          if (root.timerService)
+            root.timerService.writeDurations("longBreak", v);
         }
       }
 
