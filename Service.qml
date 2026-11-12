@@ -38,6 +38,17 @@ Item {
   property string breakPattern: "box"
   property string breatherLaunchedFor: ""
 
+  // Variable timer lengths (Phase 3). Durations live in focusd's
+  // config.toml, under the active preset; the sliders edit that preset.
+  // Loaded from the TOML on the 10s poll, written back on slider release.
+  // A change takes effect from the next session of that type.
+  property string activePreset: "pomodoro"
+  property int workMinutes: 25
+  property int shortBreakMinutes: 5
+  property int longBreakMinutes: 15
+  property string durationsRaw: ""
+  property bool durationsApplied: false
+
   property int sessionsToday: 0
   property string focusedToday: "0s"
   property string dailyGoal: ""
@@ -103,6 +114,8 @@ Item {
   property int maxConfigBytes: 65536
   property int configTimeoutMs: 5000
   readonly property string readScriptPath: Qt.resolvedUrl("read-config").toString().replace(/^file:\/\//, "")
+  readonly property string writeScriptPath: Qt.resolvedUrl("write-config").toString().replace(/^file:\/\//, "")
+  readonly property string focusdConfigPath: Quickshell.env("HOME") + "/.config/focusd/config.toml"
   property string configRaw: ""
   property bool configApplied: false
 
@@ -150,12 +163,124 @@ Item {
     }
   }
 
+  // Durations: read the active preset's lengths from focusd's
+  // config.toml (same read-config helper and 10s poll as the plugin
+  // config). Only re-parses when the file's text changed, so a slider
+  // drag is never fought by the poll, and a change made in the focusd
+  // TUI shows up here within a poll. An unparseable file keeps the last
+  // good values.
+  function loadDurations() {
+    if (durationsProc.running)
+      return;
+    durationsProc.collected = "";
+    durationsProc.collectedBytes = 0;
+    durationsProc.overflowed = false;
+    durationsProc.timedOut = false;
+    durationsProc.command = [root.readScriptPath, root.focusdConfigPath, String(root.maxConfigBytes)];
+    durationsWatchdog.restart();
+    durationsProc.running = true;
+  }
+
+  function applyDurations(ok, raw) {
+    var next = ok ? String(raw || "") : "";
+    if (next === root.durationsRaw && root.durationsApplied)
+      return;
+    root.durationsRaw = next;
+    root.durationsApplied = true;
+    var parsed = Model.parseDurations(next);
+    if (!parsed)
+      return;
+    root.activePreset = parsed.preset;
+    root.workMinutes = parsed.work;
+    root.shortBreakMinutes = parsed.shortBreak;
+    root.longBreakMinutes = parsed.longBreak;
+  }
+
+  // Write the current slider durations to the active preset in
+  // config.toml. The 10s poll re-reads the file and confirms the write;
+  // if it failed, the sliders snap back to the file's values.
+  function writeDurations() {
+    if (!root.durationsRaw)
+      return;
+    var next = Model.updateDurations(root.durationsRaw, root.workMinutes, root.shortBreakMinutes, root.longBreakMinutes);
+    if (next === null)
+      return;
+    root.durationsRaw = next;
+    // Run through bash explicitly: the script's executable bit does not
+    // survive a push through the GitHub API, and bash reads it either way.
+    Quickshell.execDetached(["bash", root.writeScriptPath, root.focusdConfigPath, next]);
+  }
+
+  Timer {
+    id: durationsWatchdog
+    interval: root.configTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (durationsProc.running) {
+        durationsProc.timedOut = true;
+        durationsProc.collected = "";
+        durationsProc.collectedBytes = 0;
+        root.killProc(durationsProc);
+      }
+    }
+  }
+
   Timer {
     id: configPoll
     interval: 10000
     repeat: true
     running: true
-    onTriggered: root.loadConfig()
+    onTriggered: {
+      root.loadConfig();
+      root.loadDurations();
+    }
+  }
+
+  Process {
+    id: durationsProc
+    property string collected: ""
+    property int collectedBytes: 0
+    property bool overflowed: false
+    property bool timedOut: false
+    stdout: SplitParser {
+      onRead: function (data) {
+        if (durationsProc.overflowed || durationsProc.timedOut)
+          return;
+        var chunk = String(data + "\n");
+        if (durationsProc.collectedBytes + chunk.length > root.maxConfigBytes) {
+          durationsProc.overflowed = true;
+          durationsProc.collected = "";
+          durationsProc.collectedBytes = 0;
+          root.killProc(durationsProc);
+          return;
+        }
+        durationsProc.collected += chunk;
+        durationsProc.collectedBytes += chunk.length;
+      }
+    }
+    stderr: SplitParser {
+      onRead: function (data) {
+        if (durationsProc.overflowed || durationsProc.timedOut)
+          return;
+        durationsProc.collectedBytes += String(data + "\n").length;
+        if (durationsProc.collectedBytes > root.maxConfigBytes) {
+          durationsProc.overflowed = true;
+          durationsProc.collected = "";
+          durationsProc.collectedBytes = 0;
+          root.killProc(durationsProc);
+        }
+      }
+    }
+    onExited: function (exitCode) {
+      durationsWatchdog.stop();
+      var ok = !durationsProc.overflowed && !durationsProc.timedOut && exitCode === 0;
+      var output = String(durationsProc.collected);
+      durationsProc.collected = "";
+      durationsProc.collectedBytes = 0;
+      durationsProc.overflowed = false;
+      durationsProc.timedOut = false;
+      root.applyDurations(ok, output);
+    }
   }
 
   Process {
@@ -414,6 +539,7 @@ Item {
     root.poll();
     root.checkVersion();
     root.loadConfig();
+    root.loadDurations();
   }
   Component.onDestruction: {
     if (FocusdShared.ServiceBridge.service === root)

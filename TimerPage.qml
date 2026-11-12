@@ -256,6 +256,92 @@ Item {
           root.timerService.addMinutes(5)
       }
     }
+
+    // Durations: sliders for the active preset's work / break lengths.
+    // A change is written to focusd's config.toml on release and takes
+    // effect from the next session of that type.
+    Column {
+      width: parent.width
+      spacing: Style.space(10)
+
+      Rectangle {
+        width: parent.width
+        height: 1
+        color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+      }
+
+      RowLayout {
+        width: parent.width
+        spacing: Style.space(8)
+
+        Text {
+          text: "Durations"
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+
+        Item {
+          Layout.fillWidth: true
+          implicitHeight: 1
+        }
+
+        Text {
+          text: root.timerService ? ("Preset: " + root.timerService.activePreset) : ""
+          color: root.foreground
+          opacity: 0.6
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+      }
+
+      DurationRow {
+        label: "Work"
+        minimum: 5
+        maximum: 90
+        minutes: root.timerService ? root.timerService.workMinutes : 25
+        onReleased: function (v) {
+          if (root.timerService) {
+            root.timerService.workMinutes = Math.round(v);
+            root.timerService.writeDurations();
+          }
+        }
+      }
+
+      DurationRow {
+        label: "Short break"
+        minimum: 1
+        maximum: 30
+        minutes: root.timerService ? root.timerService.shortBreakMinutes : 5
+        onReleased: function (v) {
+          if (root.timerService) {
+            root.timerService.shortBreakMinutes = Math.round(v);
+            root.timerService.writeDurations();
+          }
+        }
+      }
+
+      DurationRow {
+        label: "Long break"
+        minimum: 5
+        maximum: 60
+        minutes: root.timerService ? root.timerService.longBreakMinutes : 15
+        onReleased: function (v) {
+          if (root.timerService) {
+            root.timerService.longBreakMinutes = Math.round(v);
+            root.timerService.writeDurations();
+          }
+        }
+      }
+
+      Text {
+        text: "Applies from the next session of that type."
+        color: root.foreground
+        opacity: 0.5
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+    }
   }
 
   Item {
@@ -335,6 +421,49 @@ Item {
     color: foreground
     font.family: fontFamily
     font.pixelSize: Style.font.bodySmall
+  }
+
+  component DurationRow: RowLayout {
+    property string label: ""
+    property int minimum: 1
+    property int maximum: 60
+    property int minutes: 0
+
+    signal released(real value)
+
+    width: parent.width
+    spacing: Style.space(8)
+
+    Text {
+      text: label
+      color: root.foreground
+      opacity: 0.7
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.bodySmall
+      Layout.preferredWidth: Style.space(78)
+    }
+
+    PanelSlider {
+      id: durationSlider
+      Layout.fillWidth: true
+      minimum: parent.minimum
+      maximum: parent.maximum
+      step: 1
+      integer: true
+      value: parent.minutes
+      fillColor: root.activeColor
+      knobColor: root.foreground
+      onReleased: function (v) { parent.released(v) }
+    }
+
+    Text {
+      text: Math.round(durationSlider.liveValue) + " min"
+      color: root.foreground
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.bodySmall
+      Layout.preferredWidth: Style.space(52)
+      horizontalAlignment: Text.AlignRight
+    }
   }
 
   component LinearFace: Column {
