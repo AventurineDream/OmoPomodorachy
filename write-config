@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 # Atomically replace a verified regular file with the given content.
 # Usage: write-config <file> <content>
-# The file must already exist as a regular file (never a symlink); the
-# parent directory must exist and not be a symlink. Content is capped at
-# 1 MiB. Writes to a temp file in the same directory, then renames.
+# The file is created if it does not exist (mode 0644); an existing file
+# must be a regular file (never a symlink). The parent directory must
+# exist and not be a symlink. Content is capped at 1 MiB. Writes to a
+# temp file in the same directory, then renames.
 set -euo pipefail
+
+# The write itself runs in Python. If it is missing, fail loudly (a
+# silent failure would just look like the slider snapping back).
+[[ -x /usr/bin/python3 ]] || { echo "write-config: /usr/bin/python3 is required but not found" >&2; exit 1; }
 
 file="${1:?file required}"
 content="${2:?content required}"
@@ -24,6 +29,11 @@ import tempfile
 path, content = sys.argv[1], sys.argv[2]
 try:
     fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
+except FileNotFoundError:
+    # The file does not exist yet (the sessions log, before the first
+    # block). Create it — O_CREAT|O_EXCL refuses if the path appears in
+    # the meantime, including as a symlink, so nothing is followed.
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
 except OSError:
     sys.exit(1)
 try:

@@ -48,7 +48,7 @@ Start the timer with `focusd start`. Press Escape in the info page to return to 
 
 ## Configuration
 
-The timer panel has duration sliders for the active preset's work, short break, and long break (work 5–90 min, short break 1–30, long break 5–60). They edit the active preset in Focusd's `~/.config/focusd/config.toml` — the same place `focusd settings` edits — and a change takes effect from the next session of that type, never mid-session. If you change durations in the Focusd TUI, the sliders pick them up within a few seconds. (Durations used to be set in Focusd itself only; the sliders are this fork's addition.)
+The timer panel has duration sliders for the active preset's work, short break, and long break (work 5–90 min, short break 1–30, long break 5–60). They edit the active preset in Focusd's `~/.config/focusd/config.toml` — the same place `focusd settings` edits — and a change takes effect from the next session of that type, never mid-session. If you change durations in the Focusd TUI, the sliders pick them up within a few seconds. (Durations used to be set in Focusd itself only; the sliders are this fork's addition.) The sliders need `/usr/bin/python3` (present on Omarchy); if a slider change snaps back instead of sticking, that is the first thing to check. The panel also has a tag picker for work blocks ("Tag this block") — tap a category before or during a block, and the block is recorded with that tag when it ends; the Last row lets you fix the tag of the block that just ended.
 
 The plugin's options live in `~/.config/omarchy/focusd.json` (watched live, so edits apply instantly).
 
@@ -86,6 +86,18 @@ Default configuration:
 
 ```json
 { "breakPattern": "478" }
+```
+
+`rounds` stops the timer after that many work sessions in a run — set it to `4` and the timer stops after the fourth work session ends (the break is left paused, so it will not auto-start the next work session; resuming the break still opens the Breather). The panel shows the run's progress ("Rounds: 2 / 4 done"). `0` (the default) means off — run without a limit. A skipped work session counts as a round, the same way it counts for the chime. The count is in-memory: it resets when a run completes or the daemon restarts, so stopping partway through a run and coming back later picks up where it left off.
+
+```json
+{ "rounds": 4 }
+```
+
+`tags` is the list of categories for work blocks, shown as a picker in the panel ("Tag this block"). Tap one before (or during) a work block and the block is recorded with that tag when it ends. The panel also shows the last completed block ("Last: Art · 25 min · 2026-11-11") — tap its tag to cycle it, if the block that just ended was something else. Completed blocks are recorded in `~/.config/omarchy/focusd-sessions.json` (one `{ date, tag, minutes }` entry per block), which is the source the Obsidian sync (Phase 6) exports from. A block that runs out is logged at its full length; a skipped block is logged with the minutes actually spent. The default list is `Work`, `Study`, `Art`, `Admin`, `Other` — set your own in `focusd.json`:
+
+```json
+{ "tags": ["Work", "Study", "Art", "Admin", "Other"] }
 ```
 
 ```json
