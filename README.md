@@ -1,4 +1,4 @@
-# Omarchy Shell Plugin for Focusd
+# OmoPomodorachy
 
 A beautiful [Focusd](https://github.com/BibekBhusal0/focusd) pomodoro timer for the Omarchy bar. Shows the current session and remaining time with a state icon, and opens a control panel with pause, skip, and stop actions plus your streak, sessions, history, and daily goal.
 
@@ -28,7 +28,7 @@ At the time of making this there are already two, similar plugin for omarchy in 
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/BibekBhusal0/omarchy-focusd.git --enable
+omarchy plugin add https://github.com/AventurineDream/OmoPomodorachy.git --enable
 ```
 
 ## Demo
@@ -73,7 +73,7 @@ Default configuration:
 
 `icons` overrides the per-state bar icons. Any of the keys above can be replaced:
 
-`sounds` plays a gentle chime when one session ends and the next begins (a work session running out, or a break ending). It stays silent on pause, resume, and stop. On by default; set it to `false` to turn it off. `soundFile` picks the chime — a bare filename is resolved into the freedesktop sound theme (`complete.oga` by default), a path is used as-is:
+`sounds` plays a gentle chime when one session ends and the next begins (a work session running out, or a break ending). It stays silent on pause, resume, and stop, and on a manual start after a stop. Skipping to the next session also ends the current one, so it chimes too — as long as the session was running; skipping from a paused session stays silent. On by default; set it to `false` to turn it off. `soundFile` picks the chime — a bare filename is resolved into the freedesktop sound theme (`complete.oga` by default), a full path is used as-is (`~` is not expanded, so write the path out):
 
 ```json
 { "sounds": true, "soundFile": "complete.oga" }

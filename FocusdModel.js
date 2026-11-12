@@ -34,15 +34,22 @@ function chimeCommand(soundFile) {
   ]
 }
 
-// Should this poll chime? prevSession/nextSession are the session keys
-// ("work", "short-break", "long-break") from the previous poll and this
-// one. Empty strings mean "no previous poll yet" (the service starts with
-// no history), which never chimes — the first thing the timer reports is
-// not a session ending. The status is deliberately not an input: pause and
-// resume never change the session, so they never chime on their own.
-function shouldChime(prevSession, nextSession, soundsEnabled) {
+// Should this poll chime? prevSession/prevStatus are the session key and
+// status ("running", "paused") from the previous poll; nextSession is this
+// poll's session key. A chime means a session that was actually running
+// ended: the session changed AND the previous poll had it running. The
+// next session's status is deliberately not an input — a session that ran
+// out chimes whether the next one starts running or paused. A stop leaves
+// the previous status paused, so a manual start afterwards never chimes;
+// a daemon restart resets the timer to Work while the service's stopped
+// branches clear the previous session, so that never chimes either. An
+// empty previous session means "no previous poll yet" (or the timer was
+// stopped), which never chimes — the first thing the timer reports is not
+// a session ending.
+function shouldChime(prevSession, prevStatus, nextSession, soundsEnabled) {
   if (!soundsEnabled) return false
   if (!prevSession || !nextSession) return false
   if (prevSession === nextSession) return false
+  if (prevStatus !== "running") return false
   return true
 }
