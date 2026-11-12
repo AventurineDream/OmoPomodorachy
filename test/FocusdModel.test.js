@@ -6,7 +6,7 @@ const os = require("os");
 const { execFileSync } = require("child_process");
 const src = fs.readFileSync(path.join(__dirname, "..", "FocusdModel.js"), "utf8");
 const factory = new Function(
-  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, updateDuration, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, setJsonKey, configTextOk };"
+  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, updateDuration, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, setJsonKey, configTextOk, FOCUS_LOG_HEADER, focusLogText, focusLogCommand };"
 );
 const M = factory();
 
@@ -291,5 +291,43 @@ check("configTextOk: invalid JSON is not safe", M.configTextOk("{oops") === fals
 check("configTextOk: a JSON array is not safe", M.configTextOk('[1, 2]') === false);
 check("configTextOk: a JSON string is not safe", M.configTextOk('"hello"') === false);
 check("configTextOk: truncated JSON is not safe", M.configTextOk('{"rounds": 4') === false);
+// --- Obsidian sync (Phase 6) ---
+var SAMPLE_LOG_JSON = '[{"date":"2026-11-11","tag":"Work","minutes":25},{"date":"2026-11-11","tag":"Art","minutes":15}]';
+check("focusLogText: header marks the note generated", M.focusLogText("").indexOf("generated") !== -1);
+check("focusLogText: header has the table columns", M.focusLogText("").indexOf("| Date | Tag | Minutes |") !== -1);
+check("focusLogText: empty log is just the header", M.focusLogText("").trim() === M.FOCUS_LOG_HEADER.trim());
+check("focusLogText: rows are one per block", M.focusLogText(SAMPLE_LOG_JSON).indexOf("| 2026-11-11 | Work | 25 |") !== -1 && M.focusLogText(SAMPLE_LOG_JSON).indexOf("| 2026-11-11 | Art | 15 |") !== -1);
+check("focusLogText: a retag changes the vault row", M.focusLogText(M.retagSessionLog(SAMPLE_LOG_JSON, "Study")).indexOf("| 2026-11-11 | Study | 15 |") !== -1 && M.focusLogText(M.retagSessionLog(SAMPLE_LOG_JSON, "Study")).indexOf("| Art |") === -1);
+check("focusLogText: a pipe in a tag cannot break the table", M.focusLogText('[{"date":"2026-11-11","tag":"A|B","minutes":25}]').indexOf("| A/B |") !== -1);
+check("focusLogText: an invalid log is just the header", M.focusLogText("{oops").trim() === M.FOCUS_LOG_HEADER.trim());
+var FOCUS_CMD = M.focusLogCommand("/x/write-config", "/home/aven/Projects/Obsidian/Home/20_Practices/Focus/Focus Log.md", "TABLE");
+check("focusLogCommand: starts with sh -c", FOCUS_CMD[0] === "sh" && FOCUS_CMD[1] === "-c");
+check("focusLogCommand: mkdirs the parent dir then execs write-config --create", FOCUS_CMD[2].indexOf('mkdir -p "$(dirname "$1")"') !== -1 && FOCUS_CMD[2].indexOf('exec bash "$2" --create "$1" "$3"') !== -1);
+check("focusLogCommand: path, script and table are positional args", FOCUS_CMD[4] === "/home/aven/Projects/Obsidian/Home/20_Practices/Focus/Focus Log.md" && FOCUS_CMD[5] === "/x/write-config" && FOCUS_CMD[6] === "TABLE");
+check("focusLogCommand: a relative path is null", M.focusLogCommand("/x/write-config", "Focus Log.md", "TABLE") === null);
+check("focusLogCommand: an empty path is null", M.focusLogCommand("/x/write-config", "", "TABLE") === null);
+// Overwrite guard (Iolite review, PR #7): an existing file is only
+// replaced when it starts with the generated header.
+check("focusLogCommand: guard checks the existing file for the generated marker", FOCUS_CMD[2].indexOf('[ -e "$1" ]') !== -1 && FOCUS_CMD[2].indexOf("Sessions logged by OmoPomodorachy") !== -1 && FOCUS_CMD[2].indexOf("exit 0") !== -1);
+// Run the real argv against a stub write-config: a missing file is
+// written, a generated file is rewritten, a hand-written file is left
+// alone. The stub stands in for write-config --create (path, content).
+var guardDir = fs.mkdtempSync(path.join(os.tmpdir(), "focus-log-guard-"));
+var stubPath = path.join(guardDir, "write-config");
+fs.writeFileSync(stubPath, "#!/usr/bin/env bash\nif [ \"$1\" = \"--create\" ]; then shift; fi\nprintf '%s' \"$2\" > \"$1\"\n");
+fs.chmodSync(stubPath, 0o755);
+var guardTarget = path.join(guardDir, "Focus Log.md");
+function runFocusLog(content) {
+  var argv = M.focusLogCommand(stubPath, guardTarget, content);
+  execFileSync(argv[0], argv.slice(1), { stdio: "ignore" });
+}
+runFocusLog(M.focusLogText(""));
+check("focusLogCommand guard: a missing file is written", fs.readFileSync(guardTarget, "utf8") === M.focusLogText(""));
+runFocusLog(M.focusLogText(SAMPLE_LOG_JSON));
+check("focusLogCommand guard: a generated file is rewritten", fs.readFileSync(guardTarget, "utf8") === M.focusLogText(SAMPLE_LOG_JSON));
+fs.writeFileSync(guardTarget, "# My own notes\n\nDo not overwrite.\n");
+runFocusLog(M.focusLogText(SAMPLE_LOG_JSON));
+check("focusLogCommand guard: a hand-written file is left alone", fs.readFileSync(guardTarget, "utf8") === "# My own notes\n\nDo not overwrite.\n");
+fs.rmSync(guardDir, { recursive: true, force: true });
 
 console.log(`FocusdModel tests: ${pass} passed${process.exitCode ? " (WITH FAILURES)" : ""}`);
