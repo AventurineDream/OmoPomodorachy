@@ -2,12 +2,31 @@
 // everything here is unit-tested by test/FocusdModel.test.js, and the
 // service (Service.qml) only calls these, never re-implements them.
 
+// ---- A session ending ---------------------------------------------------
+// The service polls `focusd status` once a second, so a session ending is
+// a session change out of a session that was running. This is the shared
+// edge the chime and the Breather link both fire on.
+
+// True when a session that was actually running ended: the session changed
+// AND the previous poll had it running. The next session's status is
+// deliberately not an input — a session that ran out ends whether the next
+// one starts running or paused. A stop leaves the previous status paused,
+// so a manual start afterwards is not an ending; a daemon restart resets
+// the timer to Work while the service's stopped branches clear the
+// previous session, so that is not an ending either. An empty previous
+// session means "no previous poll yet" (or the timer was stopped) — the
+// first thing the timer reports is not a session ending.
+function sessionEnded(prevSession, prevStatus, nextSession) {
+  if (!prevSession || !nextSession) return false
+  if (prevSession === nextSession) return false
+  if (prevStatus !== "running") return false
+  return true
+}
+
 // ---- Session-end chime --------------------------------------------------
-// A chime when one session ends and the next begins. The service polls
-// `focusd status` once a second, so a session change is the session-end
-// event: the previous session ran out (or was skipped) and the next one
-// started. Pause and resume never change the session, so they never chime;
-// stopping leaves the session as it was, so it never chimes either.
+// A chime when one session ends and the next begins. Pause and resume
+// never change the session, so they never chime; stopping leaves the
+// session as it was, so it never chimes either.
 
 // A bare filename is resolved into the freedesktop sound theme; a path
 // (anything containing a slash) is used as-is.
@@ -34,22 +53,65 @@ function chimeCommand(soundFile) {
   ]
 }
 
-// Should this poll chime? prevSession/prevStatus are the session key and
-// status ("running", "paused") from the previous poll; nextSession is this
-// poll's session key. A chime means a session that was actually running
-// ended: the session changed AND the previous poll had it running. The
-// next session's status is deliberately not an input — a session that ran
-// out chimes whether the next one starts running or paused. A stop leaves
-// the previous status paused, so a manual start afterwards never chimes;
-// a daemon restart resets the timer to Work while the service's stopped
-// branches clear the previous session, so that never chimes either. An
-// empty previous session means "no previous poll yet" (or the timer was
-// stopped), which never chimes — the first thing the timer reports is not
-// a session ending.
+// Should this poll chime? soundsEnabled gates the chime; the ending
+// itself is sessionEnded above.
 function shouldChime(prevSession, prevStatus, nextSession, soundsEnabled) {
   if (!soundsEnabled) return false
-  if (!prevSession || !nextSession) return false
-  if (prevSession === nextSession) return false
-  if (prevStatus !== "running") return false
+  return sessionEnded(prevSession, prevStatus, nextSession)
+}
+
+// ---- Terminal-Breather link ---------------------------------------------
+// When a break starts, the Breather overlay opens with her chosen pattern,
+// for the break's remaining time. The link is a setting (breakPattern);
+// an empty pattern turns it off.
+
+// True for the two break sessions; work is not a break.
+function isBreakSession(sessionKey) {
+  return sessionKey === "short-break" || sessionKey === "long-break"
+}
+
+// Argv for summoning the Breather overlay with a pattern and a length in
+// minutes. The payload is one JSON argument to `omarchy-shell shell
+// summon`, built with JSON.stringify so the pattern name is data, never
+// syntax — a pattern name containing quotes or spaces cannot break out of
+// it. A missing Breather plugin makes the summon a silent no-op.
+function breatherCommand(pattern, minutes) {
+  return [
+    "omarchy-shell", "shell", "summon", "luotao.zen",
+    JSON.stringify({ pattern: pattern, minutes: minutes })
+  ]
+}
+
+// The break's remaining time, from the status text ("MM:SS", or "H:MM:SS"
+// for long ones), rounded DOWN to whole minutes so the Breather ends a
+// little before the break — ending early is gentler than the fullscreen
+// overlay sitting on top of the next work session. Minimum 1; 0 when the
+// text is not a time at all.
+function parseMinutes(text) {
+  var parts = String(text || "").trim().split(":")
+  if (parts.length < 2 || parts.length > 3) return 0
+  var secs = 0
+  for (var i = 0; i < parts.length; i++) {
+    var n = Number(parts[i])
+    if (!isFinite(n) || n < 0) return 0
+    secs = secs * 60 + n
+  }
+  if (secs <= 0) return 0
+  return Math.max(1, Math.floor(secs / 60))
+}
+
+// Should the Breather launch on this poll? The link fires once per break,
+// on the first poll where the break is running. launchedFor is the session
+// key the Breather already launched for ("" if none this break). A break
+// that starts paused does not launch until the user resumes it, and
+// pause/resume mid-break does not relaunch. minutes is the break's
+// remaining time in whole minutes; 0 means unknown, so no launch. An
+// empty breakPattern turns the link off.
+function shouldLaunchBreather(sessionKey, status, launchedFor, breakPattern, minutes) {
+  if (!breakPattern) return false
+  if (!isBreakSession(sessionKey)) return false
+  if (status !== "running") return false
+  if (launchedFor === sessionKey) return false
+  if (minutes <= 0) return false
   return true
 }
