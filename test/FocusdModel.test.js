@@ -6,7 +6,7 @@ const os = require("os");
 const { execFileSync } = require("child_process");
 const src = fs.readFileSync(path.join(__dirname, "..", "FocusdModel.js"), "utf8");
 const factory = new Function(
-  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, updateDuration, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag };"
+  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, updateDuration, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, FOCUS_LOG_HEADER, focusLogText, focusLogCommand };"
 );
 const M = factory();
 
@@ -275,5 +275,21 @@ check("nextTag: cycles forward", M.nextTag(["Work", "Study", "Art"], "Work") ===
 check("nextTag: wraps around", M.nextTag(["Work", "Study", "Art"], "Art") === "Work");
 check("nextTag: an unknown tag starts at the first", M.nextTag(["Work", "Study", "Art"], "Other") === "Work");
 check("nextTag: an empty list is empty", M.nextTag([], "Work") === "");
+
+// --- Obsidian sync (Phase 6) ---
+var SAMPLE_LOG_JSON = '[{"date":"2026-11-11","tag":"Work","minutes":25},{"date":"2026-11-11","tag":"Art","minutes":15}]';
+check("focusLogText: header marks the note generated", M.focusLogText("").indexOf("generated") !== -1);
+check("focusLogText: header has the table columns", M.focusLogText("").indexOf("| Date | Tag | Minutes |") !== -1);
+check("focusLogText: empty log is just the header", M.focusLogText("").trim() === M.FOCUS_LOG_HEADER.trim());
+check("focusLogText: rows are one per block", M.focusLogText(SAMPLE_LOG_JSON).indexOf("| 2026-11-11 | Work | 25 |") !== -1 && M.focusLogText(SAMPLE_LOG_JSON).indexOf("| 2026-11-11 | Art | 15 |") !== -1);
+check("focusLogText: a retag changes the vault row", M.focusLogText(M.retagSessionLog(SAMPLE_LOG_JSON, "Study")).indexOf("| 2026-11-11 | Study | 15 |") !== -1 && M.focusLogText(M.retagSessionLog(SAMPLE_LOG_JSON, "Study")).indexOf("| Art |") === -1);
+check("focusLogText: a pipe in a tag cannot break the table", M.focusLogText('[{"date":"2026-11-11","tag":"A|B","minutes":25}]').indexOf("| A/B |") !== -1);
+check("focusLogText: an invalid log is just the header", M.focusLogText("{oops").trim() === M.FOCUS_LOG_HEADER.trim());
+var FOCUS_CMD = M.focusLogCommand("/x/write-config", "/home/aven/Projects/Obsidian/Home/20_Practices/Focus/Focus Log.md", "TABLE");
+check("focusLogCommand: starts with sh -c", FOCUS_CMD[0] === "sh" && FOCUS_CMD[1] === "-c");
+check("focusLogCommand: mkdirs the parent dir then execs write-config --create", FOCUS_CMD[2].indexOf('mkdir -p "$(dirname "$1")"') !== -1 && FOCUS_CMD[2].indexOf('exec bash "$2" --create "$1" "$3"') !== -1);
+check("focusLogCommand: path, script and table are positional args", FOCUS_CMD[4] === "/home/aven/Projects/Obsidian/Home/20_Practices/Focus/Focus Log.md" && FOCUS_CMD[5] === "/x/write-config" && FOCUS_CMD[6] === "TABLE");
+check("focusLogCommand: a relative path is null", M.focusLogCommand("/x/write-config", "Focus Log.md", "TABLE") === null);
+check("focusLogCommand: an empty path is null", M.focusLogCommand("/x/write-config", "", "TABLE") === null);
 
 console.log(`FocusdModel tests: ${pass} passed${process.exitCode ? " (WITH FAILURES)" : ""}`);

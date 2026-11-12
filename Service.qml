@@ -99,6 +99,12 @@ Item {
   // history with one entry. Writes are skipped while it is false.
   readonly property int sessionsMaxBytes: 1048576
   property bool sessionsLoadedOk: false
+  // Obsidian sync (Phase 6). The vault Focus Log is a generated table
+  // of every completed work block, regenerated whole from the sessions
+  // log on every write (so a retag updates the vault row too). Default
+  // is the live vault's Focus Log; an empty focusLogPath in focusd.json
+  // turns the sync off, any other path is used as-is (must be absolute).
+  property string focusLogPath: Quickshell.env("HOME") + "/Projects/Obsidian/Home/20_Practices/Focus/Focus Log.md"
   // The remaining time at the previous status poll, in seconds — the
   // work block's length is measured from it when the block ends.
   property int prevRemainingSecs: 0
@@ -173,6 +179,26 @@ Item {
     root.tags = Model.parseTags(tg);
     if (root.tags.indexOf(root.currentTag) === -1)
       root.currentTag = root.tags[0];
+    // Obsidian sync (Phase 6): where the generated Focus Log goes. An
+    // empty string turns the sync off; anything else must be absolute.
+    var fl = root.fileConfig && root.fileConfig.focusLogPath;
+    if (fl === undefined || fl === null)
+      root.focusLogPath = Quickshell.env("HOME") + "/Projects/Obsidian/Home/20_Practices/Focus/Focus Log.md";
+    else
+      root.focusLogPath = String(fl);
+  }
+
+  // Rewrite the vault Focus Log from the in-memory sessions log. The
+  // whole table is regenerated each time (never appended), so a retag
+  // updates the vault row. Nothing is written while the log is unloaded
+  // or the sync is off — a vault write must never come from a stale view.
+  function writeFocusLog() {
+    if (!root.focusLogPath || !root.sessionsLoadedOk)
+      return;
+    var table = Model.focusLogText(root.sessionsRaw);
+    var cmd = Model.focusLogCommand(root.writeScriptPath, root.focusLogPath, table);
+    if (cmd)
+      Quickshell.execDetached(cmd);
   }
   property var fileConfig: ({})
   function parseFileConfig(raw) {
@@ -386,6 +412,7 @@ Item {
     root.sessionLog = Model.parseSessionLog(logText);
     root.lastWorkSession = root.sessionLog.length ? root.sessionLog[root.sessionLog.length - 1] : null;
     Quickshell.execDetached(["bash", root.writeScriptPath, "--create", root.sessionsPath, logText]);
+    root.writeFocusLog();
   }
 
   Timer {
@@ -712,6 +739,7 @@ Item {
         root.sessionLog = Model.parseSessionLog(logText);
         root.lastWorkSession = entry;
         Quickshell.execDetached(["bash", root.writeScriptPath, "--create", root.sessionsPath, logText]);
+        root.writeFocusLog();
       }
       if (Model.shouldStopAfterRound(root.rounds, root.roundsCompleted)) {
         runEnded = true;
