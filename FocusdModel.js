@@ -162,58 +162,41 @@ function parseDurations(tomlText) {
   return { preset: preset, work: work, shortBreak: shortBreak, longBreak: longBreak }
 }
 
-// Rewrite the active preset's three durations in the TOML text, keeping
-// everything else byte-for-byte (comments, order, the other presets).
-// Values are clamped to their slider ranges. Returns the updated text,
-// or null when the active preset or a duration key is missing, or a
-// value is not a number — so the caller never writes a broken file.
-// Rewrite the active preset's durations in the TOML text, keeping
-// everything else byte-for-byte (comments, order, the other presets).
-// Only a key whose desired value differs from the file's current value
-// for it is rewritten — a preset value outside the slider range (a
-// 120-minute deep-work block, a 2-minute long break) is left alone until
-// she actually moves that slider, so moving a different slider never
-// quietly rewrites it. A rewritten value is clamped to its slider range.
-// Returns the updated text, or null when the active preset or a duration
-// key is missing, or a value is not a number — so the caller never writes
-// a broken file.
-function updateDurations(tomlText, work, shortBreak, longBreak) {
+// Rewrite one duration in the active preset's section of the TOML text,
+// keeping everything else byte-for-byte (comments, order, the other
+// presets). Only the given key is touched, and only when its desired value
+// differs from the file's current value for it. This is what makes a
+// slider safe against a change made in the Focusd TUI to a different key:
+// the other sliders still hold their (now stale) values, but those values
+// are never passed in, so they are never written back. A preset value
+// outside the slider range (a 120-minute deep-work block, a 2-minute long
+// break) is left alone until she actually moves that slider. A rewritten
+// value is clamped to its slider range. Returns the updated text (the
+// input unchanged when the value already matches), or null when the active
+// preset or the duration key is missing, the kind is unknown, or the value
+// is not a number — so the caller never writes a broken file.
+function updateDuration(tomlText, kind, value) {
   var text = String(tomlText || "")
   var parsed = parseDurations(text)
   if (!parsed) return null
-  var w = Number(work)
-  var s = Number(shortBreak)
-  var l = Number(longBreak)
-  if (!isFinite(w) || !isFinite(s) || !isFinite(l)) return null
+  var keyMap = { work: "work_minutes", shortBreak: "short_break_minutes", longBreak: "long_break_minutes" }
+  var key = keyMap[kind]
+  if (!key) return null
+  var desired = Number(value)
+  if (!isFinite(desired)) return null
+  if (desired === parsed[kind]) return text
+  var clamped = clampDuration(kind, desired)
+  if (clamped === null) return null
   var section = presetSection(text, parsed.preset)
   if (!section) return null
   var body = text.slice(section.start, section.end)
-  var changes = [
-    ["work_minutes", "work", w, parsed.work],
-    ["short_break_minutes", "shortBreak", s, parsed.shortBreak],
-    ["long_break_minutes", "longBreak", l, parsed.longBreak],
-  ]
-  for (var i = 0; i < changes.length; i++) {
-    var key = changes[i][0]
-    var kind = changes[i][1]
-    var desired = changes[i][2]
-    var current = changes[i][3]
-    if (desired === current) continue
-    var clamped = clampDuration(kind, desired)
-    if (clamped === null) return null
-    var re = new RegExp("^(\\s*" + key + "\\s*=\\s*)[0-9]+", "m")
-    var matched = false
-    body = body.replace(re, function (m, p1) { matched = true; return p1 + clamped })
-    if (!matched) return null
-  }
+  var re = new RegExp("^(\\s*" + key + "\\s*=\\s*)[0-9]+", "m")
+  var matched = false
+  body = body.replace(re, function (m, p1) { matched = true; return p1 + clamped })
+  if (!matched) return null
   return text.slice(0, section.start) + body + text.slice(section.end)
 }
-// on the first poll where the break is running. launchedFor is the session
-// key the Breather already launched for ("" if none this break). A break
-// that starts paused does not launch until the user resumes it, and
-// pause/resume mid-break does not relaunch. minutes is the break's
-// remaining time in whole minutes; 0 means unknown, so no launch. An
-// empty breakPattern turns the link off.
+
 // ---- Rounds before stop (Phase 4) ----
 // A run is a sequence of work sessions. `rounds` (0 = off, unlimited) is
 // how many work sessions run before the timer stops. The count is
@@ -238,6 +221,20 @@ function shouldStopAfterRound(rounds, roundsCompleted) {
   return rounds > 0 && roundsCompleted >= rounds
 }
 
+// Launch the Breather once per break, on the first poll where the break is
+// running. launchedFor is the session key the Breather already launched for
+// ("" if none this break). A break that starts paused does not launch until
+// the user resumes it, and pause/resume mid-break does not relaunch. minutes
+// is the break's remaining time in whole minutes; 0 means unknown, so no
+// launch. An empty breakPattern turns the link off.
+function shouldLaunchBreather(sessionKey, status, launchedFor, breakPattern, minutes) {
+  if (!breakPattern) return false
+  if (!isBreakSession(sessionKey)) return false
+  if (status !== "running") return false
+  if (launchedFor === sessionKey) return false
+  if (minutes <= 0) return false
+  return true
+}
 // ---- Block tagging (Phase 5) ----
 // Each work block gets a category, picked in advance (the picker sets the
 // tag for the next/current work block) or afterwards (the panel's Last row
@@ -327,18 +324,19 @@ function parseSessionLog(text) {
   return out
 }
 
-// Append one block to the log text and return the new JSON (2-space
-// indent, so the file stays readable). An invalid entry leaves the log
-// unchanged; an invalid existing file is replaced with a fresh log
-// containing just this entry.
+// Append one block to the log text and return the new JSON, compact (one
+// line) so the file stays small — pretty-printing costs ~70 bytes an
+// entry and the read is capped, so compact buys years of headroom. An
+// invalid entry leaves the log unchanged; an invalid existing file is
+// replaced with a fresh log containing just this entry.
 function appendSessionLog(text, entry) {
   var log = parseSessionLog(text)
   var date = String((entry && entry.date) || "")
   var tag = String((entry && entry.tag) || "")
   var minutes = Number(entry && entry.minutes)
-  if (!date || !tag || !isFinite(minutes) || minutes <= 0) return JSON.stringify(log, null, 2)
+  if (!date || !tag || !isFinite(minutes) || minutes <= 0) return JSON.stringify(log)
   log.push({ date: date, tag: tag, minutes: Math.round(minutes) })
-  return JSON.stringify(log, null, 2)
+  return JSON.stringify(log)
 }
 
 // Change the tag of the most recent block in the log. Returns the new
@@ -347,7 +345,7 @@ function retagSessionLog(text, tag) {
   var log = parseSessionLog(text)
   if (!log.length) return null
   log[log.length - 1].tag = String(tag || "")
-  return JSON.stringify(log, null, 2)
+  return JSON.stringify(log)
 }
 
 // The next tag after the current one in the list, wrapping around. Used
@@ -360,11 +358,3 @@ function nextTag(tags, currentTag) {
   return list[(idx + 1) % list.length]
 }
 
-function shouldLaunchBreather(sessionKey, status, launchedFor, breakPattern, minutes) {
-  if (!breakPattern) return false
-  if (!isBreakSession(sessionKey)) return false
-  if (status !== "running") return false
-  if (launchedFor === sessionKey) return false
-  if (minutes <= 0) return false
-  return true
-}
