@@ -235,3 +235,126 @@ function shouldLaunchBreather(sessionKey, status, launchedFor, breakPattern, min
   if (minutes <= 0) return false
   return true
 }
+// ---- Block tagging (Phase 5) ----
+// Each work block gets a category, picked in advance (the picker sets the
+// tag for the next/current work block) or afterwards (the panel's Last row
+// cycles the tag of the block that just ended). Tags are a setting in
+// ~/.config/omarchy/focusd.json: "tags": ["Work", "Study", "Art", ...].
+// Completed work blocks are recorded in ~/.config/omarchy/
+// focusd-sessions.json, one entry per block: { date, tag, minutes }.
+// That file is the source Phase 6 exports to the Obsidian log.
+
+// The default category list, used when the `tags` setting is missing,
+// empty, or not a list of strings.
+var DEFAULT_TAGS = ["Work", "Study", "Art", "Admin", "Other"]
+
+// Normalize the `tags` setting: an array of non-empty strings, trimmed
+// and de-duplicated. A single string is one tag. Anything else (missing,
+// empty, not a string/array) falls back to the defaults.
+function parseTags(value) {
+  var list = []
+  if (typeof value === "string") {
+    list = [value]
+  } else if (Array.isArray(value)) {
+    list = value
+  } else {
+    return DEFAULT_TAGS.slice()
+  }
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var t = String(list[i] || "").trim()
+    if (t && out.indexOf(t) === -1) out.push(t)
+  }
+  return out.length ? out : DEFAULT_TAGS.slice()
+}
+
+// Total seconds in a "MM:SS" or "H:MM:SS" remaining-time string. 0 when
+// the text is not a time. (parseMinutes floors to whole minutes for the
+// Breather; this one keeps the seconds, for measuring a block's length.)
+function parseSeconds(text) {
+  var parts = String(text || "").trim().split(":")
+  if (parts.length < 2 || parts.length > 3) return 0
+  var secs = 0
+  for (var i = 0; i < parts.length; i++) {
+    var n = Number(parts[i])
+    if (!isFinite(n) || n < 0) return 0
+    secs = secs * 60 + n
+  }
+  return secs
+}
+
+// Minutes actually spent in the work block that just ended: the
+// configured work length minus what was still on the clock at the last
+// poll before it ended. A block that ran out is the full length; a
+// skipped block is the elapsed part. Unknown remaining time (no previous
+// poll) is the full length. Clamped to 1..workMinutes.
+function elapsedMinutes(workMinutes, prevRemainingSecs) {
+  var w = Number(workMinutes)
+  if (!isFinite(w) || w <= 0) return 0
+  var remaining = Number(prevRemainingSecs)
+  if (!isFinite(remaining) || remaining <= 0) return Math.round(w)
+  var elapsed = Math.round((w * 60 - remaining) / 60)
+  return Math.max(1, Math.min(Math.round(w), elapsed))
+}
+
+// The session log: a JSON array of { date, tag, minutes } entries, one
+// per completed work block. Invalid or empty text is an empty log — a
+// corrupted file is replaced with a fresh one on the next block, rather
+// than blocking logging forever. Entries missing a field are dropped.
+function parseSessionLog(text) {
+  var raw = String(text || "").trim()
+  if (!raw) return []
+  var parsed
+  try {
+    parsed = JSON.parse(raw)
+  } catch (e) {
+    return []
+  }
+  if (!Array.isArray(parsed)) return []
+  var out = []
+  for (var i = 0; i < parsed.length; i++) {
+    var e = parsed[i]
+    if (!e || typeof e !== "object") continue
+    var date = String(e.date || "")
+    var tag = String(e.tag || "")
+    var minutes = Number(e.minutes)
+    if (!date || !tag || !isFinite(minutes) || minutes <= 0) continue
+    out.push({ date: date, tag: tag, minutes: Math.round(minutes) })
+  }
+  return out
+}
+
+// Append one block to the log text and return the new JSON, compact (one
+// line) so the file stays small — pretty-printing costs ~70 bytes an
+// entry and the read is capped, so compact buys years of headroom. An
+// invalid entry leaves the log unchanged; an invalid existing file is
+// replaced with a fresh log containing just this entry.
+function appendSessionLog(text, entry) {
+  var log = parseSessionLog(text)
+  var date = String((entry && entry.date) || "")
+  var tag = String((entry && entry.tag) || "")
+  var minutes = Number(entry && entry.minutes)
+  if (!date || !tag || !isFinite(minutes) || minutes <= 0) return JSON.stringify(log)
+  log.push({ date: date, tag: tag, minutes: Math.round(minutes) })
+  return JSON.stringify(log)
+}
+
+// Change the tag of the most recent block in the log. Returns the new
+// JSON, or null when there is no block to retag (empty or invalid log).
+function retagSessionLog(text, tag) {
+  var log = parseSessionLog(text)
+  if (!log.length) return null
+  log[log.length - 1].tag = String(tag || "")
+  return JSON.stringify(log)
+}
+
+// The next tag after the current one in the list, wrapping around. Used
+// by the Last row to cycle a finished block's tag. An unknown current tag
+// (or an empty list) starts at the first tag.
+function nextTag(tags, currentTag) {
+  var list = Array.isArray(tags) ? tags : []
+  if (!list.length) return ""
+  var idx = list.indexOf(currentTag)
+  return list[(idx + 1) % list.length]
+}
+

@@ -76,6 +76,39 @@ Item {
   property int roundsCompleted: 0
   property int prevSessionsToday: -1
 
+  // Block tagging (Phase 5). `tags` is the category list from
+  // focusd.json; `currentTag` is the tag for the current/next work block,
+  // picked in the panel. Completed work blocks are recorded in
+  // ~/.config/omarchy/focusd-sessions.json (one { date, tag, minutes }
+  // entry per block) — the source Phase 6 exports to the Obsidian log.
+  // `lastWorkSession` is the most recent completed block, for the panel's
+  // Last row (tap its tag to fix it afterwards). The log is re-read on
+  // the 10s poll, so a hand edit shows up; only this plugin writes it.
+  property var tags: Model.DEFAULT_TAGS.slice()
+  property string currentTag: "Work"
+  property var lastWorkSession: null
+  property var sessionLog: []
+  readonly property string sessionsPath: Quickshell.env("HOME") + "/.config/omarchy/focusd-sessions.json"
+  property string sessionsRaw: ""
+  property bool sessionsApplied: false
+  // The log has its own 1 MiB read cap (matching write-config's), not the
+  // 64 KiB config cap: compact entries are ~50 bytes, so 1 MiB is years
+  // of blocks. sessionsLoadedOk is true only when the last read
+  // succeeded — a failed read (overflow, timeout) must never be treated
+  // as an empty log, or the next block-end write would replace the whole
+  // history with one entry. Writes are skipped while it is false.
+  readonly property int sessionsMaxBytes: 1048576
+  property bool sessionsLoadedOk: false
+  // The remaining time at the previous status poll, in seconds — the
+  // work block's length is measured from it when the block ends.
+  property int prevRemainingSecs: 0
+  // The configured work length when the current work block started, in
+  // minutes. elapsedMinutes uses this, not the current slider value, so
+  // changing the work length mid-block does not mis-measure the block.
+  // 0 means "unknown" (no work session seen yet) — then the current
+  // work length is used instead.
+  property int blockStartWorkMinutes: 0
+
   property int sessionsToday: 0
   property string focusedToday: "0s"
   property string dailyGoal: ""
@@ -133,6 +166,13 @@ Item {
     var r = root.fileConfig && root.fileConfig.rounds;
     var clamped = (r === undefined || r === null) ? 0 : Model.clampRounds(r);
     root.rounds = clamped === null ? 0 : clamped;
+    // Block tags (Phase 5): the category list for work blocks, from
+    // focusd.json. Anything else (or nothing) is the default five. If the
+    // current tag is not in the list anymore, fall back to the first.
+    var tg = root.fileConfig && root.fileConfig.tags;
+    root.tags = Model.parseTags(tg);
+    if (root.tags.indexOf(root.currentTag) === -1)
+      root.currentTag = root.tags[0];
   }
   property var fileConfig: ({})
   function parseFileConfig(raw) {
@@ -286,6 +326,82 @@ Item {
     }
   }
 
+  // Sessions log: read the completed-work-blocks log (same read-config
+  // helper and 10s poll as the plugin config). Only re-parses when the
+  // file's text changed. A missing file is an empty log — read-config
+  // exits 0 with no output for it, so it reads as success and the file
+  // is created on the first block (write-config --create). A failed read
+  // (overflow, timeout) keeps the last good log and clears
+  // sessionsLoadedOk, so no write can clobber the file from a stale view.
+  function loadSessions() {
+    if (sessionsProc.running)
+      return;
+    sessionsProc.collected = "";
+    sessionsProc.collectedBytes = 0;
+    sessionsProc.overflowed = false;
+    sessionsProc.timedOut = false;
+    sessionsProc.command = [root.readScriptPath, root.sessionsPath, String(root.sessionsMaxBytes)];
+    sessionsWatchdog.restart();
+    sessionsProc.running = true;
+  }
+
+  function applySessions(ok, raw) {
+    if (!ok) {
+      // The read failed (overflow, timeout, or an I/O error). Keep the
+      // last good log exactly as it is — do not treat the failure as an
+      // empty log — and mark the log unloaded so no write runs until a
+      // read succeeds again.
+      root.sessionsLoadedOk = false;
+      return;
+    }
+    root.sessionsLoadedOk = true;
+    var next = String(raw || "");
+    if (next === root.sessionsRaw && root.sessionsApplied)
+      return;
+    root.sessionsRaw = next;
+    root.sessionsApplied = true;
+    var log = Model.parseSessionLog(next);
+    root.sessionLog = log;
+    root.lastWorkSession = log.length ? log[log.length - 1] : null;
+  }
+
+  // Block tagging: pick the tag for the current/next work block.
+  function setCurrentTag(tag) {
+    if (root.tags.indexOf(tag) !== -1)
+      root.currentTag = tag;
+  }
+
+  // Fix the last completed block's tag afterwards: cycle it to the next
+  // category and rewrite the log. Nothing to fix when no block has
+  // completed yet, and nothing is written while the log is unloaded (a
+  // failed read) — a retag must never rewrite the file from a stale view.
+  function cycleLastTag() {
+    if (!root.lastWorkSession || !root.sessionsLoadedOk)
+      return;
+    var next = Model.nextTag(root.tags, root.lastWorkSession.tag);
+    var logText = Model.retagSessionLog(root.sessionsRaw, next);
+    if (logText === null)
+      return;
+    root.sessionsRaw = logText;
+    root.sessionLog = Model.parseSessionLog(logText);
+    root.lastWorkSession = root.sessionLog.length ? root.sessionLog[root.sessionLog.length - 1] : null;
+    Quickshell.execDetached(["bash", root.writeScriptPath, "--create", root.sessionsPath, logText]);
+  }
+
+  Timer {
+    id: sessionsWatchdog
+    interval: root.configTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (sessionsProc.running) {
+        sessionsProc.timedOut = true;
+        sessionsProc.collected = "";
+        sessionsProc.collectedBytes = 0;
+        root.killProc(sessionsProc);
+      }
+    }
+  }
+
   Timer {
     id: configPoll
     interval: 10000
@@ -294,6 +410,7 @@ Item {
     onTriggered: {
       root.loadConfig();
       root.loadDurations();
+      root.loadSessions();
     }
   }
 
@@ -341,6 +458,53 @@ Item {
       durationsProc.overflowed = false;
       durationsProc.timedOut = false;
       root.applyDurations(ok, output);
+    }
+  }
+
+  Process {
+    id: sessionsProc
+    property string collected: ""
+    property int collectedBytes: 0
+    property bool overflowed: false
+    property bool timedOut: false
+    stdout: SplitParser {
+      onRead: function (data) {
+        if (sessionsProc.overflowed || sessionsProc.timedOut)
+          return;
+        var chunk = String(data + "\n");
+        if (sessionsProc.collectedBytes + chunk.length > root.sessionsMaxBytes) {
+          sessionsProc.overflowed = true;
+          sessionsProc.collected = "";
+          sessionsProc.collectedBytes = 0;
+          root.killProc(sessionsProc);
+          return;
+        }
+        sessionsProc.collected += chunk;
+        sessionsProc.collectedBytes += chunk.length;
+      }
+    }
+    stderr: SplitParser {
+      onRead: function (data) {
+        if (sessionsProc.overflowed || sessionsProc.timedOut)
+          return;
+        sessionsProc.collectedBytes += String(data + "\n").length;
+        if (sessionsProc.collectedBytes > root.sessionsMaxBytes) {
+          sessionsProc.overflowed = true;
+          sessionsProc.collected = "";
+          sessionsProc.collectedBytes = 0;
+          root.killProc(sessionsProc);
+        }
+      }
+    }
+    onExited: function (exitCode) {
+      sessionsWatchdog.stop();
+      var ok = !sessionsProc.overflowed && !sessionsProc.timedOut && exitCode === 0;
+      var output = String(sessionsProc.collected);
+      sessionsProc.collected = "";
+      sessionsProc.collectedBytes = 0;
+      sessionsProc.overflowed = false;
+      sessionsProc.timedOut = false;
+      root.applySessions(ok, output);
     }
   }
 
@@ -475,6 +639,7 @@ Item {
       // poll, not as a session ending. The run is over too.
       root.prevSession = "";
       root.prevStatus = "";
+      root.prevRemainingSecs = 0;
       root.roundsCompleted = 0;
       root.prevSessionsToday = -1;
       return;
@@ -487,6 +652,7 @@ Item {
       status = "stopped";
       root.prevSession = "";
       root.prevStatus = "";
+      root.prevRemainingSecs = 0;
       root.roundsCompleted = 0;
       root.prevSessionsToday = -1;
       return;
@@ -504,6 +670,13 @@ Item {
     var alt = String(state.alt || "work");
     var newStatus = classes.indexOf("paused") !== -1 ? "paused" : "running";
     var sessionKey = alt.replace(/-paused$/, "");
+    // Remember the configured work length when a work block starts. The
+    // block's minutes are measured from this, not the current slider
+    // value, so changing the work length mid-block does not mis-measure
+    // it. (A block already running at startup is recorded at the first
+    // poll, which is the best guess available.)
+    if (sessionKey === "work" && root.prevSession !== "work")
+      root.blockStartWorkMinutes = root.workMinutes;
     // A session ending is a session change out of a session that was
     // running: the previous session ran out (or was skipped) and the next
     // one began. The chime fires once, on the poll that sees the change.
@@ -521,6 +694,25 @@ Item {
     var runEnded = false;
     if (Model.workSessionEnded(root.prevSession, root.prevStatus, sessionKey)) {
       root.roundsCompleted += 1;
+      // Block tagging: record the finished work block — its tag and the
+      // minutes actually spent — in the session log, and show it as the
+      // Last block in the panel. A skipped block is logged with the
+      // elapsed minutes, not the full length. The block's length is
+      // measured from the work length when it started, not the current
+      // slider value. Nothing is written while the log is unloaded (a
+      // failed read) — the block is dropped rather than risking the log.
+      // (The write goes through write-config --create, which creates the
+      // log file on the first block.)
+      var blockLength = root.blockStartWorkMinutes > 0 ? root.blockStartWorkMinutes : root.workMinutes;
+      var blockMinutes = Model.elapsedMinutes(blockLength, root.prevRemainingSecs);
+      var entry = { date: Qt.formatDate(new Date(), "yyyy-MM-dd"), tag: root.currentTag, minutes: blockMinutes };
+      if (root.sessionsLoadedOk) {
+        var logText = Model.appendSessionLog(root.sessionsRaw, entry);
+        root.sessionsRaw = logText;
+        root.sessionLog = Model.parseSessionLog(logText);
+        root.lastWorkSession = entry;
+        Quickshell.execDetached(["bash", root.writeScriptPath, "--create", root.sessionsPath, logText]);
+      }
       if (Model.shouldStopAfterRound(root.rounds, root.roundsCompleted)) {
         runEnded = true;
         root.roundsCompleted = 0;
@@ -554,6 +746,9 @@ Item {
     }
     root.prevSession = sessionKey;
     root.prevStatus = newStatus;
+    // The remaining time on this poll is what the next poll measures a
+    // session's length against, if that session ends there.
+    root.prevRemainingSecs = Model.parseSeconds(state.text);
     root.status = newStatus;
     root.session = sessionKey;
     root.sessionLabel = sessionLabelFor(sessionKey);
@@ -639,6 +834,7 @@ Item {
     root.checkVersion();
     root.loadConfig();
     root.loadDurations();
+    root.loadSessions();
   }
   Component.onDestruction: {
     if (FocusdShared.ServiceBridge.service === root)
