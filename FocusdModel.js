@@ -359,6 +359,41 @@ function nextTag(tags, currentTag) {
 }
 
 
+// ---- Rounds setting (GUI) ----
+// Set one key in a JSON settings file. Parses the text (an empty or
+// invalid file starts fresh with just this key) and returns the JSON,
+// 2-space indented so a hand-edited file stays readable. All other
+// keys are kept as-is. Used by the panel's Rounds slider to write the
+// `rounds` limit back to focusd.json.
+function setJsonKey(text, key, value) {
+  var obj = {}
+  var raw = String(text || "").trim()
+  if (raw) {
+    try { obj = JSON.parse(raw) || {} } catch (e) { obj = {} }
+  }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) obj = {}
+  obj[String(key)] = value
+  return JSON.stringify(obj, null, 2) + "\n"
+}
+
+// ---- Config write guard ----
+// True when a focusd.json text is safe to write back from: empty (no
+// file yet, nothing to lose) or a valid JSON object. An invalid file,
+// or a valid JSON value that is not an object, parses to {} — writing
+// from that would wipe the other keys (sounds, breakPattern, tags...).
+// The Service sets its configOk flag from this after each read, and
+// writeRounds refuses to write while it is false.
+function configTextOk(text) {
+  var raw = String(text || "").trim()
+  if (!raw) return true
+  try {
+    var parsed = JSON.parse(raw)
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+  } catch (e) {
+    return false
+  }
+}
+
 // ---- Obsidian sync (Phase 6) ----
 // The vault Focus Log is a generated markdown table, one row per
 // completed work block. The WHOLE table is regenerated from the sessions
@@ -388,10 +423,14 @@ function focusLogText(text) {
 // positional arguments, quoted in the script, so a path with spaces or
 // a table with quotes is data, never syntax. Returns null when the log
 // path is not an absolute path (an empty path disables the sync).
+// Overwrite guard: an existing file is only replaced when it starts
+// with the generated header (the "Sessions logged by OmoPomodorachy"
+// marker in its first three lines) — a hand-written note at that path
+// is left alone, and the write is skipped silently.
 function focusLogCommand(writeScriptPath, focusLogPath, tableText) {
   var path = String(focusLogPath || "")
   if (!path || path.charAt(0) !== "/") return null
   return ["sh", "-c",
-    'mkdir -p "$(dirname "$1")" && exec bash "$2" --create "$1" "$3"',
+    'mkdir -p "$(dirname "$1")" && if [ -e "$1" ] && ! head -n 3 "$1" | grep -q "Sessions logged by OmoPomodorachy"; then exit 0; fi && exec bash "$2" --create "$1" "$3"',
     "sh", path, String(writeScriptPath || ""), String(tableText || "")]
 }

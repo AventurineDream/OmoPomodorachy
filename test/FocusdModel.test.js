@@ -6,7 +6,7 @@ const os = require("os");
 const { execFileSync } = require("child_process");
 const src = fs.readFileSync(path.join(__dirname, "..", "FocusdModel.js"), "utf8");
 const factory = new Function(
-  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, updateDuration, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, FOCUS_LOG_HEADER, focusLogText, focusLogCommand };"
+  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, updateDuration, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, setJsonKey, configTextOk, FOCUS_LOG_HEADER, focusLogText, focusLogCommand };"
 );
 const M = factory();
 
@@ -276,6 +276,21 @@ check("nextTag: wraps around", M.nextTag(["Work", "Study", "Art"], "Art") === "W
 check("nextTag: an unknown tag starts at the first", M.nextTag(["Work", "Study", "Art"], "Other") === "Work");
 check("nextTag: an empty list is empty", M.nextTag([], "Work") === "");
 
+// --- Rounds setting (GUI) ---
+check("setJsonKey: sets a key in existing JSON", JSON.parse(M.setJsonKey('{"rounds": 0, "tags": ["Work"]}', "rounds", 4)).rounds === 4);
+check("setJsonKey: keeps the other keys", JSON.parse(M.setJsonKey('{"rounds": 0, "tags": ["Work"]}', "rounds", 4)).tags[0] === "Work");
+check("setJsonKey: an empty file starts fresh", JSON.parse(M.setJsonKey("", "rounds", 4)).rounds === 4);
+check("setJsonKey: an invalid file starts fresh", JSON.parse(M.setJsonKey("{oops", "rounds", 4)).rounds === 4);
+check("setJsonKey: output is indented JSON", M.setJsonKey("", "rounds", 4).indexOf('\n  "rounds": 4') !== -1);
+
+// --- Config write guard ---
+check("configTextOk: empty text is safe (no file yet)", M.configTextOk("") === true);
+check("configTextOk: whitespace-only is safe", M.configTextOk("  \n ") === true);
+check("configTextOk: a valid object is safe", M.configTextOk('{"rounds": 4}') === true);
+check("configTextOk: invalid JSON is not safe", M.configTextOk("{oops") === false);
+check("configTextOk: a JSON array is not safe", M.configTextOk('[1, 2]') === false);
+check("configTextOk: a JSON string is not safe", M.configTextOk('"hello"') === false);
+check("configTextOk: truncated JSON is not safe", M.configTextOk('{"rounds": 4') === false);
 // --- Obsidian sync (Phase 6) ---
 var SAMPLE_LOG_JSON = '[{"date":"2026-11-11","tag":"Work","minutes":25},{"date":"2026-11-11","tag":"Art","minutes":15}]';
 check("focusLogText: header marks the note generated", M.focusLogText("").indexOf("generated") !== -1);
@@ -291,5 +306,28 @@ check("focusLogCommand: mkdirs the parent dir then execs write-config --create",
 check("focusLogCommand: path, script and table are positional args", FOCUS_CMD[4] === "/home/aven/Projects/Obsidian/Home/20_Practices/Focus/Focus Log.md" && FOCUS_CMD[5] === "/x/write-config" && FOCUS_CMD[6] === "TABLE");
 check("focusLogCommand: a relative path is null", M.focusLogCommand("/x/write-config", "Focus Log.md", "TABLE") === null);
 check("focusLogCommand: an empty path is null", M.focusLogCommand("/x/write-config", "", "TABLE") === null);
+// Overwrite guard (Iolite review, PR #7): an existing file is only
+// replaced when it starts with the generated header.
+check("focusLogCommand: guard checks the existing file for the generated marker", FOCUS_CMD[2].indexOf('[ -e "$1" ]') !== -1 && FOCUS_CMD[2].indexOf("Sessions logged by OmoPomodorachy") !== -1 && FOCUS_CMD[2].indexOf("exit 0") !== -1);
+// Run the real argv against a stub write-config: a missing file is
+// written, a generated file is rewritten, a hand-written file is left
+// alone. The stub stands in for write-config --create (path, content).
+var guardDir = fs.mkdtempSync(path.join(os.tmpdir(), "focus-log-guard-"));
+var stubPath = path.join(guardDir, "write-config");
+fs.writeFileSync(stubPath, "#!/usr/bin/env bash\nif [ \"$1\" = \"--create\" ]; then shift; fi\nprintf '%s' \"$2\" > \"$1\"\n");
+fs.chmodSync(stubPath, 0o755);
+var guardTarget = path.join(guardDir, "Focus Log.md");
+function runFocusLog(content) {
+  var argv = M.focusLogCommand(stubPath, guardTarget, content);
+  execFileSync(argv[0], argv.slice(1), { stdio: "ignore" });
+}
+runFocusLog(M.focusLogText(""));
+check("focusLogCommand guard: a missing file is written", fs.readFileSync(guardTarget, "utf8") === M.focusLogText(""));
+runFocusLog(M.focusLogText(SAMPLE_LOG_JSON));
+check("focusLogCommand guard: a generated file is rewritten", fs.readFileSync(guardTarget, "utf8") === M.focusLogText(SAMPLE_LOG_JSON));
+fs.writeFileSync(guardTarget, "# My own notes\n\nDo not overwrite.\n");
+runFocusLog(M.focusLogText(SAMPLE_LOG_JSON));
+check("focusLogCommand guard: a hand-written file is left alone", fs.readFileSync(guardTarget, "utf8") === "# My own notes\n\nDo not overwrite.\n");
+fs.rmSync(guardDir, { recursive: true, force: true });
 
 console.log(`FocusdModel tests: ${pass} passed${process.exitCode ? " (WITH FAILURES)" : ""}`);
