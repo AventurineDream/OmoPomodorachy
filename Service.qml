@@ -35,8 +35,14 @@ Item {
   // link off. breatherLaunchedFor is the session key the Breather already
   // launched for, so a break launches once; it clears when a work session
   // starts. Set in configure() from ~/.config/omarchy/focusd.json.
+  // suppressBreatherUntilPaused holds the Breather off after a run ends:
+  // the run-end reset is async, so the break still reads running for a
+  // poll or two, and without this the Breather would launch for a break
+  // that is about to sit paused. It clears when a poll sees the break
+  // paused, so a later resume launches as intended.
   property string breakPattern: "box"
   property string breatherLaunchedFor: ""
+  property bool suppressBreatherUntilPaused: false
 
   // Variable timer lengths (Phase 3). Durations live in focusd's
   // config.toml, under the active preset; the sliders edit that preset.
@@ -57,6 +63,18 @@ Item {
   property bool pendingWrite: false
   property string pendingWriteKind: ""
   property int pendingWriteValue: 0
+
+  // Rounds before stop (Phase 4). `rounds` is how many work sessions run
+  // before the timer stops (0 = off, unlimited); `roundsCompleted` is how
+  // many work sessions this run has finished. The count is in-memory: it
+  // resets when a run completes, when the daemon restarts, when the shell
+  // restarts, and when the day changes (sessions_today drops). Set in
+  // configure() from ~/.config/omarchy/focusd.json. prevSessionsToday is
+  // the last poll's sessions_today (-1 = unknown, e.g. after a daemon
+  // restart), used to spot the day change.
+  property int rounds: 0
+  property int roundsCompleted: 0
+  property int prevSessionsToday: -1
 
   property int sessionsToday: 0
   property string focusedToday: "0s"
@@ -110,6 +128,11 @@ Item {
     // empty pattern turns the link off. "box" is the default.
     var bp = root.fileConfig && root.fileConfig.breakPattern;
     root.breakPattern = (bp === undefined || bp === null) ? "box" : String(bp);
+    // Rounds before stop: how many work sessions run before the timer
+    // stops. 0 (the default) means off — run without a limit.
+    var r = root.fileConfig && root.fileConfig.rounds;
+    var clamped = (r === undefined || r === null) ? 0 : Model.clampRounds(r);
+    root.rounds = clamped === null ? 0 : clamped;
   }
   property var fileConfig: ({})
   function parseFileConfig(raw) {
@@ -449,9 +472,11 @@ Item {
       status = "stopped";
       // No timer to chime from: clear the previous session so the next
       // session the daemon reports (it restarts as Work) reads as a first
-      // poll, not as a session ending.
+      // poll, not as a session ending. The run is over too.
       root.prevSession = "";
       root.prevStatus = "";
+      root.roundsCompleted = 0;
+      root.prevSessionsToday = -1;
       return;
     }
     var state = {};
@@ -462,8 +487,19 @@ Item {
       status = "stopped";
       root.prevSession = "";
       root.prevStatus = "";
+      root.roundsCompleted = 0;
+      root.prevSessionsToday = -1;
       return;
     }
+    // A new day starts a new run: sessions_today drops (to 0) when the
+    // date changes, so a run stopped yesterday does not carry its count
+    // into today. (A manual focusd stop leaves the timer paused, not
+    // stopped, so it does not reset the count — the day boundary is the
+    // signal that the run is over.)
+    var sessionsTodayNow = Number(state.sessions_today) || 0;
+    if (root.prevSessionsToday >= 0 && sessionsTodayNow < root.prevSessionsToday)
+      root.roundsCompleted = 0;
+    root.prevSessionsToday = sessionsTodayNow;
     var classes = state.class || [];
     var alt = String(state.alt || "work");
     var newStatus = classes.indexOf("paused") !== -1 ? "paused" : "running";
@@ -476,6 +512,31 @@ Item {
     // never chimes either.
     if (Model.shouldChime(root.prevSession, root.prevStatus, sessionKey, root.soundsEnabled))
       Quickshell.execDetached(Model.chimeCommand(Model.resolveSoundFile(root.soundFile)));
+    // Rounds: a work session ending into a break completes a round. When
+    // the run reaches the configured number of rounds, stop the timer
+    // (reset the break to paused) and start a fresh run. The Breather is
+    // not launched for the break that ends the run — it would count down
+    // while the break sits paused; resuming the break launches it instead.
+    // (The chime above still fires: the work session did end.)
+    var runEnded = false;
+    if (Model.workSessionEnded(root.prevSession, root.prevStatus, sessionKey)) {
+      root.roundsCompleted += 1;
+      if (Model.shouldStopAfterRound(root.rounds, root.roundsCompleted)) {
+        runEnded = true;
+        root.roundsCompleted = 0;
+        // Hold the Breather off until a poll sees the break paused: the
+        // reset below is async, so the break still reads running for a
+        // poll or two, and the Breather would launch for a break that is
+        // about to sit paused.
+        root.suppressBreatherUntilPaused = true;
+        Quickshell.execDetached(["focusd", "reset"]);
+      }
+    }
+    // The run-end reset is async. Until a poll sees the break paused,
+    // keep the Breather suppressed; once it reads paused, clear the flag
+    // so a later resume launches as intended.
+    if (Model.isBreakSession(sessionKey) && newStatus === "paused")
+      root.suppressBreatherUntilPaused = false;
     // Breather link: launch once per break, on the first poll where the
     // break is running. A break that starts paused does not launch until
     // the user resumes it; pause/resume mid-break does not relaunch. The
@@ -484,7 +545,7 @@ Item {
     // session-ended edge; the Breather has its own rule.)
     if (sessionKey === "work") {
       root.breatherLaunchedFor = "";
-    } else {
+    } else if (!runEnded && !root.suppressBreatherUntilPaused) {
       var breakMinutes = Model.parseMinutes(state.text);
       if (Model.shouldLaunchBreather(sessionKey, newStatus, root.breatherLaunchedFor, root.breakPattern, breakMinutes)) {
         root.breatherLaunchedFor = sessionKey;
@@ -500,7 +561,7 @@ Item {
     root.remainingText = String(state.text || "");
     root.progress = Math.max(0, Math.min(1, (Number(state.percentage) || 0) / 100));
     root.tooltipText = String(state.tooltip || "");
-    root.sessionsToday = Number(state.sessions_today) || 0;
+    root.sessionsToday = sessionsTodayNow;
     root.focusedToday = String(state.focused_today || "");
     root.dailyGoal = String(state.daily_goal || "");
     root.currentStreak = Number(state.current_streak) || 0;
