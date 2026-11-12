@@ -358,3 +358,20 @@ function nextTag(tags, currentTag) {
   return list[(idx + 1) % list.length]
 }
 
+
+// ---- Rounds setting (GUI) ----
+// Set one key in a JSON settings file. Parses the text (an empty or
+// invalid file starts fresh with just this key) and returns the JSON,
+// 2-space indented so a hand-edited file stays readable. All other
+// keys are kept as-is. Used by the panel's Rounds slider to write the
+// `rounds` limit back to focusd.json.
+function setJsonKey(text, key, value) {
+  var obj = {}
+  var raw = String(text || "").trim()
+  if (raw) {
+    try { obj = JSON.parse(raw) || {} } catch (e) { obj = {} }
+  }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) obj = {}
+  obj[String(key)] = value
+  return JSON.stringify(obj, null, 2) + "\n"
+}
