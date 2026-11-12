@@ -432,7 +432,8 @@ Item {
         font.family: root.fontFamily
         font.pixelSize: Style.font.bodySmall
         wrapMode: Text.Wrap
-        width: parent.width
+        // Leave room for the info button in the panel's bottom-right corner.
+        width: parent.width - Style.space(36)
       }
     }
   }
