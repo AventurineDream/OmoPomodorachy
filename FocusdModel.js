@@ -375,3 +375,21 @@ function setJsonKey(text, key, value) {
   obj[String(key)] = value
   return JSON.stringify(obj, null, 2) + "\n"
 }
+
+// ---- Config write guard ----
+// True when a focusd.json text is safe to write back from: empty (no
+// file yet, nothing to lose) or a valid JSON object. An invalid file,
+// or a valid JSON value that is not an object, parses to {} — writing
+// from that would wipe the other keys (sounds, breakPattern, tags...).
+// The Service sets its configOk flag from this after each read, and
+// writeRounds refuses to write while it is false.
+function configTextOk(text) {
+  var raw = String(text || "").trim()
+  if (!raw) return true
+  try {
+    var parsed = JSON.parse(raw)
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+  } catch (e) {
+    return false
+  }
+}
