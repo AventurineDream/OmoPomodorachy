@@ -224,7 +224,26 @@ Item {
     root.configRaw = next;
     root.configApplied = true;
     root.fileConfig = root.parseFileConfig(next);
-    root.configOk = ok && Model.configTextOk(next);
+    // Inline parse-ok check (not via the model): the text is safe to
+    // write back from when it is empty (no file yet, nothing to lose)
+    // or a valid JSON object. An invalid file parses to {}, and writing
+    // from that would wipe the other keys — so writeRounds refuses to
+    // write while this is false.
+    var textOk = false;
+    if (ok) {
+      var trimmed = String(next || "").trim();
+      if (!trimmed) {
+        textOk = true;
+      } else {
+        try {
+          var parsed = JSON.parse(trimmed);
+          textOk = parsed && typeof parsed === "object" && !Array.isArray(parsed);
+        } catch (e) {
+          textOk = false;
+        }
+      }
+    }
+    root.configOk = textOk;
     root.configure();
   }
 
