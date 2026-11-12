@@ -101,10 +101,11 @@ Item {
   property bool sessionsLoadedOk: false
   // Obsidian sync (Phase 6). The vault Focus Log is a generated table
   // of every completed work block, regenerated whole from the sessions
-  // log on every write (so a retag updates the vault row too). Default
-  // is the live vault's Focus Log; an empty focusLogPath in focusd.json
-  // turns the sync off, any other path is used as-is (must be absolute).
-  property string focusLogPath: Quickshell.env("HOME") + "/Projects/Obsidian/Home/20_Practices/Focus/Focus Log.md"
+  // log on every write (so a retag updates the vault row too). The sync
+  // is OFF by default — focusLogPath is empty until Aven okays direct
+  // vault writes; set it in focusd.json to turn the sync on. An existing
+  // file is only replaced when it starts with the generated header.
+  property string focusLogPath: ""
   // The remaining time at the previous status poll, in seconds — the
   // work block's length is measured from it when the block ends.
   property int prevRemainingSecs: 0
@@ -179,11 +180,12 @@ Item {
     root.tags = Model.parseTags(tg);
     if (root.tags.indexOf(root.currentTag) === -1)
       root.currentTag = root.tags[0];
-    // Obsidian sync (Phase 6): where the generated Focus Log goes. An
-    // empty string turns the sync off; anything else must be absolute.
+    // Obsidian sync (Phase 6): where the generated Focus Log goes. Off
+    // by default — an empty focusLogPath until Aven okays direct vault
+    // writes; a path in focusd.json turns it on (must be absolute).
     var fl = root.fileConfig && root.fileConfig.focusLogPath;
     if (fl === undefined || fl === null)
-      root.focusLogPath = Quickshell.env("HOME") + "/Projects/Obsidian/Home/20_Practices/Focus/Focus Log.md";
+      root.focusLogPath = "";
     else
       root.focusLogPath = String(fl);
   }
@@ -191,7 +193,9 @@ Item {
   // Rewrite the vault Focus Log from the in-memory sessions log. The
   // whole table is regenerated each time (never appended), so a retag
   // updates the vault row. Nothing is written while the log is unloaded
-  // or the sync is off — a vault write must never come from a stale view.
+  // or the sync is off — a vault write must never come from a stale view —
+  // and an existing note is only replaced when it starts with the
+  // generated header, so a hand-written note at that path is left alone.
   function writeFocusLog() {
     if (!root.focusLogPath || !root.sessionsLoadedOk)
       return;
@@ -214,8 +218,14 @@ Item {
   readonly property string readScriptPath: Qt.resolvedUrl("read-config").toString().replace(/^file:\/\//, "")
   readonly property string writeScriptPath: Qt.resolvedUrl("write-config").toString().replace(/^file:\/\//, "")
   readonly property string focusdConfigPath: Quickshell.env("HOME") + "/.config/focusd/config.toml"
+  readonly property string focusdJsonPath: Quickshell.env("HOME") + "/.config/omarchy/focusd.json"
   property string configRaw: ""
   property bool configApplied: false
+  // True only when the last focusd.json read succeeded and the text
+  // parsed (or was empty — no file yet, nothing to lose). writeRounds
+  // refuses to write while this is false: a failed read or an invalid
+  // file parses to {}, and writing from that would wipe the other keys.
+  property bool configOk: false
 
   function killProc(proc) {
     try {
@@ -232,7 +242,7 @@ Item {
     configProc.collectedBytes = 0;
     configProc.overflowed = false;
     configProc.timedOut = false;
-    configProc.command = [root.readScriptPath, Quickshell.env("HOME") + "/.config/omarchy/focusd.json", String(root.maxConfigBytes)];
+    configProc.command = ["bash", root.readScriptPath, root.focusdJsonPath, String(root.maxConfigBytes)];
     configWatchdog.restart();
     configProc.running = true;
   }
@@ -244,7 +254,42 @@ Item {
     root.configRaw = next;
     root.configApplied = true;
     root.fileConfig = root.parseFileConfig(next);
+    // The text is safe to write back from when it is empty (no file
+    // yet, nothing to lose) or a valid JSON object. An invalid file
+    // parses to {}, and writing from that would wipe the other keys —
+    // so writeRounds refuses to write while this is false.
+    root.configOk = ok && Model.configTextOk(next);
     root.configure();
+  }
+
+  // A Rounds slider release writes only the rounds key to focusd.json,
+  // built from the last-read config so the other keys are kept. Two
+  // guards: the write is refused while the last read failed or the file
+  // is invalid (configOk false — the cached config is {} then, and
+  // writing from it would wipe the other keys), and the cached config
+  // is updated with the new value so a second move compares against the
+  // value just written instead of the stale one. The file is written
+  // only by this plugin (and a hand edit), so there is no programmatic
+  // writer to race the way the focusd TUI races config.toml. The 10s
+  // poll re-reads the file and confirms the write; if it failed, the
+  // slider snaps back to the file's value.
+  function writeRounds(value) {
+    var v = Model.clampRounds(value);
+    if (v === null)
+      return;
+    if (!root.configOk)
+      return;
+    var cfg = root.fileConfig || {};
+    // Skip the write when the file already has this value (e.g. the
+    // slider was released without moving).
+    if (cfg.rounds === v)
+      return;
+    cfg.rounds = v;
+    root.rounds = v;
+    var updated = Model.setJsonKey(JSON.stringify(cfg), "rounds", v);
+    root.configRaw = updated;
+    root.fileConfig = cfg;
+    Quickshell.execDetached(["bash", root.writeScriptPath, "--create", root.focusdJsonPath, updated]);
   }
 
   Timer {
@@ -274,7 +319,7 @@ Item {
     durationsProc.collectedBytes = 0;
     durationsProc.overflowed = false;
     durationsProc.timedOut = false;
-    durationsProc.command = [root.readScriptPath, root.focusdConfigPath, String(root.maxConfigBytes)];
+    durationsProc.command = ["bash", root.readScriptPath, root.focusdConfigPath, String(root.maxConfigBytes)];
     durationsWatchdog.restart();
     durationsProc.running = true;
   }
@@ -366,7 +411,7 @@ Item {
     sessionsProc.collectedBytes = 0;
     sessionsProc.overflowed = false;
     sessionsProc.timedOut = false;
-    sessionsProc.command = [root.readScriptPath, root.sessionsPath, String(root.sessionsMaxBytes)];
+    sessionsProc.command = ["bash", root.readScriptPath, root.sessionsPath, String(root.sessionsMaxBytes)];
     sessionsWatchdog.restart();
     sessionsProc.running = true;
   }
