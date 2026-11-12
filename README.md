@@ -16,6 +16,7 @@ At the time of making this there are already two, similar plugin for omarchy in 
 - Info page with links to GitHub, settings TUI, and stats TUI
 - Automatic update checking for AUR installations
 - Streak, daily goal, and sessions today from Focusd history
+- Duration sliders for the active preset's work, short break, and long break (work 5–90 min, short break 1–30, long break 5–60)
 - Customizable state icons
 - Switchable popup style (linear hero or circular face)
 - Full keyboard navigation support
@@ -47,7 +48,9 @@ Start the timer with `focusd start`. Press Escape in the info page to return to 
 
 ## Configuration
 
-Durations and presets are set in Focusd itself (`focusd settings`). The plugin's options live in `~/.config/omarchy/focusd.json` (watched live, so edits apply instantly).
+The timer panel has duration sliders for the active preset's work, short break, and long break (work 5–90 min, short break 1–30, long break 5–60). They edit the active preset in Focusd's `~/.config/focusd/config.toml` — the same place `focusd settings` edits — and a change takes effect from the next session of that type, never mid-session. If you change durations in the Focusd TUI, the sliders pick them up within a few seconds. (Durations used to be set in Focusd itself only; the sliders are this fork's addition.)
+
+The plugin's options live in `~/.config/omarchy/focusd.json` (watched live, so edits apply instantly).
 
 Default configuration:
 

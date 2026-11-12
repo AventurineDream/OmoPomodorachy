@@ -6,7 +6,7 @@ const os = require("os");
 const { execFileSync } = require("child_process");
 const src = fs.readFileSync(path.join(__dirname, "..", "FocusdModel.js"), "utf8");
 const factory = new Function(
-  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather };"
+  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, updateDurations };"
 );
 const M = factory();
 
@@ -123,5 +123,64 @@ check("negative minutes: no launch", M.shouldLaunchBreather("short-break", "runn
 // After a work session the launch key clears, so the next break of the
 // same kind launches again.
 check("next short break after work: launch", M.shouldLaunchBreather("short-break", "running", "", "box", 5) === true);
+
+// --- Durations (TOML parse / update) ---
+const SAMPLE_TOML = [
+  "# Which preset is currently active",
+  'active_preset = "pomodoro"',
+  "daily_goal_minutes = 0",
+  "",
+  "[presets.pomodoro]",
+  "work_minutes = 25",
+  "short_break_minutes = 5",
+  "long_break_minutes = 15",
+  "sessions_before_long_break = 4",
+  "",
+  "[presets.deep_work]",
+  "work_minutes = 50",
+  "short_break_minutes = 10",
+  "long_break_minutes = 30",
+  "sessions_before_long_break = 4",
+  "",
+  "# [presets.study]",
+  "# work_minutes = 45",
+  "",
+].join("\n");
+
+const parsed = M.parseDurations(SAMPLE_TOML);
+check("parseDurations finds the active preset", parsed && parsed.preset === "pomodoro");
+check("parseDurations reads work", parsed && parsed.work === 25);
+check("parseDurations reads short break", parsed && parsed.shortBreak === 5);
+check("parseDurations reads long break", parsed && parsed.longBreak === 15);
+const deepToml = SAMPLE_TOML.replace('active_preset = "pomodoro"', 'active_preset = "deep_work"');
+const deep = M.parseDurations(deepToml);
+check("parseDurations follows the active preset", deep && deep.preset === "deep_work" && deep.work === 50 && deep.shortBreak === 10 && deep.longBreak === 30);
+check("parseDurations: missing preset is null", M.parseDurations(SAMPLE_TOML.replace('[presets.pomodoro]', "[presets.other]")) === null);
+check("parseDurations: missing key is null", M.parseDurations(SAMPLE_TOML.replace("work_minutes = 25\n", "")) === null);
+check("parseDurations: no active_preset is null", M.parseDurations(SAMPLE_TOML.replace('active_preset = "pomodoro"\n', "")) === null);
+check("parseDurations: empty text is null", M.parseDurations("") === null);
+
+const updated = M.updateDurations(SAMPLE_TOML, 45, 8, 20);
+check("updateDurations returns text", typeof updated === "string");
+const reparsed = M.parseDurations(updated);
+check("updateDurations writes work", reparsed && reparsed.work === 45);
+check("updateDurations writes short break", reparsed && reparsed.shortBreak === 8);
+check("updateDurations writes long break", reparsed && reparsed.longBreak === 20);
+check("updateDurations leaves deep_work alone", updated.includes("work_minutes = 50") && updated.includes("short_break_minutes = 10") && updated.includes("long_break_minutes = 30"));
+check("updateDurations preserves comments and other keys", updated.includes("# Which preset is currently active") && updated.includes("daily_goal_minutes = 0") && updated.includes("sessions_before_long_break = 4"));
+check("updateDurations preserves the commented preset", updated.includes("# [presets.study]") && updated.includes("# work_minutes = 45"));
+check("updateDurations clamps work to 90", M.parseDurations(M.updateDurations(SAMPLE_TOML, 200, 5, 15)).work === 90);
+check("updateDurations clamps short break to 1", M.parseDurations(M.updateDurations(SAMPLE_TOML, 25, 0, 15)).shortBreak === 1);
+check("updateDurations clamps long break to 60", M.parseDurations(M.updateDurations(SAMPLE_TOML, 25, 5, 999)).longBreak === 60);
+check("updateDurations: missing preset is null", M.updateDurations(SAMPLE_TOML.replace('[presets.pomodoro]', "[presets.other]"), 45, 8, 20) === null);
+check("updateDurations: non-numeric value is null", M.updateDurations(SAMPLE_TOML, "abc", 5, 15) === null);
+check("updateDurations: missing key is null", M.updateDurations(SAMPLE_TOML.replace("long_break_minutes = 15\n", ""), 45, 8, 20) === null);
+
+check("clampDuration work 5..90", M.clampDuration("work", 4) === 5 && M.clampDuration("work", 91) === 90 && M.clampDuration("work", 25) === 25);
+check("clampDuration short 1..30", M.clampDuration("shortBreak", 0) === 1 && M.clampDuration("shortBreak", 31) === 30);
+check("clampDuration long 5..60", M.clampDuration("longBreak", 4) === 5 && M.clampDuration("longBreak", 61) === 60);
+check("clampDuration rounds", M.clampDuration("work", 25.6) === 26);
+check("clampDuration unknown kind is null", M.clampDuration("nope", 5) === null);
+check("clampDuration non-numeric is null", M.clampDuration("work", "abc") === null);
 
 console.log(`FocusdModel tests: ${pass} passed${process.exitCode ? " (WITH FAILURES)" : ""}`);

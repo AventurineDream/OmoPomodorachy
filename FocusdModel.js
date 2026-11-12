@@ -100,7 +100,96 @@ function parseMinutes(text) {
   return Math.max(1, Math.floor(secs / 60))
 }
 
-// Should the Breather launch on this poll? The link fires once per break,
+// ---- Variable timer lengths (Phase 3) ----
+// Durations live in focusd's config.toml, under the active preset:
+//   active_preset = "pomodoro"
+//   [presets.pomodoro]
+//   work_minutes = 25
+//   short_break_minutes = 5
+//   long_break_minutes = 15
+// focusd re-reads the TOML when a session starts, so a change takes
+// effect from the NEXT session of that type, never mid-session.
+
+// Slider ranges, in minutes.
+var DURATION_LIMITS = { work: [5, 90], shortBreak: [1, 30], longBreak: [5, 60] }
+
+function clampDuration(kind, value) {
+  var limits = DURATION_LIMITS[kind]
+  if (!limits) return null
+  var n = Number(value)
+  if (!isFinite(n)) return null
+  return Math.max(limits[0], Math.min(limits[1], Math.round(n)))
+}
+
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+// The body span of the active preset's [presets.<name>] section in the
+// TOML text: { start, end } (the text between the header line and the
+// next section header, or end of file). Null when the section is missing.
+function presetSection(tomlText, preset) {
+  var text = String(tomlText || "")
+  var headerRe = new RegExp("^\\[presets\\." + escapeRegExp(preset) + "\\][ \\t]*$", "m")
+  var headerMatch = headerRe.exec(text)
+  if (!headerMatch) return null
+  var start = headerMatch.index + headerMatch[0].length
+  var rest = text.slice(start)
+  var nextHeader = rest.search(/^\[/m)
+  var end = nextHeader === -1 ? text.length : start + nextHeader
+  return { start: start, end: end }
+}
+
+// The active preset's durations, from the focusd config TOML text.
+// Returns { preset, work, shortBreak, longBreak } or null when the file
+// is missing the active preset or any of its three durations.
+function parseDurations(tomlText) {
+  var text = String(tomlText || "")
+  var presetMatch = text.match(/^[ \t]*active_preset[ \t]*=[ \t]*"([^"\n]+)"/m)
+  if (!presetMatch) return null
+  var preset = presetMatch[1]
+  var section = presetSection(text, preset)
+  if (!section) return null
+  var body = text.slice(section.start, section.end)
+  function minutesFor(key) {
+    var m = body.match(new RegExp("^[ \\t]*" + key + "[ \\t]*=[ \\t]*([0-9]+)[ \\t]*(?:#.*)?$", "m"))
+    return m ? Number(m[1]) : null
+  }
+  var work = minutesFor("work_minutes")
+  var shortBreak = minutesFor("short_break_minutes")
+  var longBreak = minutesFor("long_break_minutes")
+  if (work === null || shortBreak === null || longBreak === null) return null
+  return { preset: preset, work: work, shortBreak: shortBreak, longBreak: longBreak }
+}
+
+// Rewrite the active preset's three durations in the TOML text, keeping
+// everything else byte-for-byte (comments, order, the other presets).
+// Values are clamped to their slider ranges. Returns the updated text,
+// or null when the active preset or a duration key is missing, or a
+// value is not a number — so the caller never writes a broken file.
+function updateDurations(tomlText, work, shortBreak, longBreak) {
+  var text = String(tomlText || "")
+  var parsed = parseDurations(text)
+  if (!parsed) return null
+  var w = clampDuration("work", work)
+  var s = clampDuration("shortBreak", shortBreak)
+  var l = clampDuration("longBreak", longBreak)
+  if (w === null || s === null || l === null) return null
+  var section = presetSection(text, parsed.preset)
+  if (!section) return null
+  var body = text.slice(section.start, section.end)
+  // True when the key was found (even when the value is already what we
+  // want, so the text does not change); false when the key is missing.
+  function replace(key, value) {
+    var re = new RegExp("^(\\s*" + key + "\\s*=\\s*)[0-9]+", "m")
+    var matched = false
+    body = body.replace(re, function (m, p1) { matched = true; return p1 + value })
+    return matched
+  }
+  if (!replace("work_minutes", w) || !replace("short_break_minutes", s) || !replace("long_break_minutes", l))
+    return null
+  return text.slice(0, section.start) + body + text.slice(section.end)
+}
 // on the first poll where the break is running. launchedFor is the session
 // key the Breather already launched for ("" if none this break). A break
 // that starts paused does not launch until the user resumes it, and
