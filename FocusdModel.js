@@ -162,32 +162,38 @@ function parseDurations(tomlText) {
   return { preset: preset, work: work, shortBreak: shortBreak, longBreak: longBreak }
 }
 
-// Rewrite the active preset's three durations in the TOML text, keeping
-// everything else byte-for-byte (comments, order, the other presets).
-// Values are clamped to their slider ranges. Returns the updated text,
-// or null when the active preset or a duration key is missing, or a
-// value is not a number — so the caller never writes a broken file.
-function updateDurations(tomlText, work, shortBreak, longBreak) {
+// Rewrite one duration in the active preset's section of the TOML text,
+// keeping everything else byte-for-byte (comments, order, the other
+// presets). Only the given key is touched, and only when its desired value
+// differs from the file's current value for it. This is what makes a
+// slider safe against a change made in the Focusd TUI to a different key:
+// the other sliders still hold their (now stale) values, but those values
+// are never passed in, so they are never written back. A preset value
+// outside the slider range (a 120-minute deep-work block, a 2-minute long
+// break) is left alone until she actually moves that slider. A rewritten
+// value is clamped to its slider range. Returns the updated text (the
+// input unchanged when the value already matches), or null when the active
+// preset or the duration key is missing, the kind is unknown, or the value
+// is not a number — so the caller never writes a broken file.
+function updateDuration(tomlText, kind, value) {
   var text = String(tomlText || "")
   var parsed = parseDurations(text)
   if (!parsed) return null
-  var w = clampDuration("work", work)
-  var s = clampDuration("shortBreak", shortBreak)
-  var l = clampDuration("longBreak", longBreak)
-  if (w === null || s === null || l === null) return null
+  var keyMap = { work: "work_minutes", shortBreak: "short_break_minutes", longBreak: "long_break_minutes" }
+  var key = keyMap[kind]
+  if (!key) return null
+  var desired = Number(value)
+  if (!isFinite(desired)) return null
+  if (desired === parsed[kind]) return text
+  var clamped = clampDuration(kind, desired)
+  if (clamped === null) return null
   var section = presetSection(text, parsed.preset)
   if (!section) return null
   var body = text.slice(section.start, section.end)
-  // True when the key was found (even when the value is already what we
-  // want, so the text does not change); false when the key is missing.
-  function replace(key, value) {
-    var re = new RegExp("^(\\s*" + key + "\\s*=\\s*)[0-9]+", "m")
-    var matched = false
-    body = body.replace(re, function (m, p1) { matched = true; return p1 + value })
-    return matched
-  }
-  if (!replace("work_minutes", w) || !replace("short_break_minutes", s) || !replace("long_break_minutes", l))
-    return null
+  var re = new RegExp("^(\\s*" + key + "\\s*=\\s*)[0-9]+", "m")
+  var matched = false
+  body = body.replace(re, function (m, p1) { matched = true; return p1 + clamped })
+  if (!matched) return null
   return text.slice(0, section.start) + body + text.slice(section.end)
 }
 // on the first poll where the break is running. launchedFor is the session

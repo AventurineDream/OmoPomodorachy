@@ -6,6 +6,10 @@
 # 1 MiB. Writes to a temp file in the same directory, then renames.
 set -euo pipefail
 
+# The write itself runs in Python. If it is missing, fail loudly (a
+# silent failure would just look like the slider snapping back).
+[[ -x /usr/bin/python3 ]] || { echo "write-config: /usr/bin/python3 is required but not found" >&2; exit 1; }
+
 file="${1:?file required}"
 content="${2:?content required}"
 
