@@ -100,6 +100,12 @@ Default configuration:
 { "tags": ["Work", "Study", "Art", "Admin", "Other"] }
 ```
 
+`focusLogPath` is where the Obsidian Focus Log goes — a generated markdown table of every completed work block (`20_Practices/Focus/Focus Log.md` in the vault by default). The whole table is regenerated from the sessions log every time a block ends or a block is retagged, so a retag in the panel updates the vault row too; the note says it is generated, so don't hand-edit its rows (the next block would overwrite them). The parent folder is created if it is missing. Set a different path, or `""` to turn the sync off:
+
+```json
+{ "focusLogPath": "" }
+```
+
 ```json
 "bar": {
   "layout": {

@@ -358,3 +358,40 @@ function nextTag(tags, currentTag) {
   return list[(idx + 1) % list.length]
 }
 
+
+// ---- Obsidian sync (Phase 6) ----
+// The vault Focus Log is a generated markdown table, one row per
+// completed work block. The WHOLE table is regenerated from the sessions
+// log on every write (never appended to) — so a retag in the panel
+// updates the vault row too, instead of leaving a stale row behind.
+// The note says it is generated, so nobody hand-edits rows that the
+// next block would overwrite.
+var FOCUS_LOG_HEADER = "# Focus Log\n\nSessions logged by OmoPomodorachy — one row per completed work block. This note is generated from ~/.config/omarchy/focusd-sessions.json; change a block's tag in the panel's Last row, not by editing this table.\n\n| Date | Tag | Minutes |\n| --- | --- | --- |"
+
+// Build the full Focus Log note text from the sessions log text. Tags
+// are scrubbed of pipes and newlines so a tag can never break the
+// table. An empty or invalid log is just the header (no rows).
+function focusLogText(text) {
+  var log = parseSessionLog(text)
+  var out = [FOCUS_LOG_HEADER]
+  for (var i = 0; i < log.length; i++) {
+    var e = log[i]
+    var tag = String(e.tag || "").replace(/[|\n\r]/g, "/")
+    out.push("| " + e.date + " | " + tag + " | " + e.minutes + " |")
+  }
+  return out.join("\n") + "\n"
+}
+
+// The argv for writing the Focus Log to the vault: create the parent
+// folder if it is missing, then atomically replace the note with the
+// new table (write-config --create). Paths and content travel as
+// positional arguments, quoted in the script, so a path with spaces or
+// a table with quotes is data, never syntax. Returns null when the log
+// path is not an absolute path (an empty path disables the sync).
+function focusLogCommand(writeScriptPath, focusLogPath, tableText) {
+  var path = String(focusLogPath || "")
+  if (!path || path.charAt(0) !== "/") return null
+  return ["sh", "-c",
+    'mkdir -p "$(dirname "$1")" && exec bash "$2" --create "$1" "$3"',
+    "sh", path, String(writeScriptPath || ""), String(tableText || "")]
+}
