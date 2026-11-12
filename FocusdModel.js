@@ -83,8 +83,10 @@ function breatherCommand(pattern, minutes) {
 }
 
 // The break's remaining time, from the status text ("MM:SS", or "H:MM:SS"
-// for long ones), rounded up to whole minutes so the Breather covers the
-// rest of the break. Returns 0 when the text is not a time at all.
+// for long ones), rounded DOWN to whole minutes so the Breather ends a
+// little before the break — ending early is gentler than the fullscreen
+// overlay sitting on top of the next work session. Minimum 1; 0 when the
+// text is not a time at all.
 function parseMinutes(text) {
   var parts = String(text || "").trim().split(":")
   if (parts.length < 2 || parts.length > 3) return 0
@@ -95,5 +97,21 @@ function parseMinutes(text) {
     secs = secs * 60 + n
   }
   if (secs <= 0) return 0
-  return Math.max(1, Math.ceil(secs / 60))
+  return Math.max(1, Math.floor(secs / 60))
+}
+
+// Should the Breather launch on this poll? The link fires once per break,
+// on the first poll where the break is running. launchedFor is the session
+// key the Breather already launched for ("" if none this break). A break
+// that starts paused does not launch until the user resumes it, and
+// pause/resume mid-break does not relaunch. minutes is the break's
+// remaining time in whole minutes; 0 means unknown, so no launch. An
+// empty breakPattern turns the link off.
+function shouldLaunchBreather(sessionKey, status, launchedFor, breakPattern, minutes) {
+  if (!breakPattern) return false
+  if (!isBreakSession(sessionKey)) return false
+  if (status !== "running") return false
+  if (launchedFor === sessionKey) return false
+  if (minutes <= 0) return false
+  return true
 }

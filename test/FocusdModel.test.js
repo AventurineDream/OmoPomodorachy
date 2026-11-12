@@ -6,7 +6,7 @@ const os = require("os");
 const { execFileSync } = require("child_process");
 const src = fs.readFileSync(path.join(__dirname, "..", "FocusdModel.js"), "utf8");
 const factory = new Function(
-  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes };"
+  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather };"
 );
 const M = factory();
 
@@ -99,16 +99,29 @@ const trickyPayload = JSON.parse(tricky[4]);
 check("breatherCommand escapes a quoted pattern", trickyPayload.pattern === 'a"b');
 check("breatherCommand payload is one argument", tricky.length === 5);
 
-// --- parseMinutes ---
+// --- parseMinutes (rounded down, so the Breather ends before the break) ---
 check("05:00 is 5 minutes", M.parseMinutes("05:00") === 5);
-check("04:59 rounds up to 5", M.parseMinutes("04:59") === 5);
+check("04:59 rounds down to 4", M.parseMinutes("04:59") === 4);
 check("15:00 is 15 minutes", M.parseMinutes("15:00") === 15);
-check("04:30 rounds up to 5", M.parseMinutes("04:30") === 5);
+check("04:30 rounds down to 4", M.parseMinutes("04:30") === 4);
 check("00:30 is 1 minute (minimum)", M.parseMinutes("00:30") === 1);
 check("1:00:00 is 60 minutes", M.parseMinutes("1:00:00") === 60);
 check("25:00 is 25 minutes", M.parseMinutes("25:00") === 25);
 check("empty text is 0", M.parseMinutes("") === 0);
 check("non-time text is 0", M.parseMinutes("paused") === 0);
 check("00:00 is 0", M.parseMinutes("00:00") === 0);
+
+// --- shouldLaunchBreather (once per break, first running poll) ---
+check("running break, not launched: launch", M.shouldLaunchBreather("short-break", "running", "", "box", 5) === true);
+check("long break, not launched: launch", M.shouldLaunchBreather("long-break", "running", "", "478", 15) === true);
+check("paused break: no launch (waits for resume)", M.shouldLaunchBreather("short-break", "paused", "", "box", 5) === false);
+check("already launched this break: no relaunch", M.shouldLaunchBreather("short-break", "running", "short-break", "box", 5) === false);
+check("work session: no launch", M.shouldLaunchBreather("work", "running", "", "box", 25) === false);
+check("empty pattern (link off): no launch", M.shouldLaunchBreather("short-break", "running", "", "", 5) === false);
+check("0 minutes (unknown remaining): no launch", M.shouldLaunchBreather("short-break", "running", "", "box", 0) === false);
+check("negative minutes: no launch", M.shouldLaunchBreather("short-break", "running", "", "box", -1) === false);
+// After a work session the launch key clears, so the next break of the
+// same kind launches again.
+check("next short break after work: launch", M.shouldLaunchBreather("short-break", "running", "", "box", 5) === true);
 
 console.log(`FocusdModel tests: ${pass} passed${process.exitCode ? " (WITH FAILURES)" : ""}`);
