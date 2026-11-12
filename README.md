@@ -88,7 +88,7 @@ Default configuration:
 { "breakPattern": "478" }
 ```
 
-`rounds` stops the timer after that many work sessions in a run — set it to `4` and the timer stops after the fourth work session ends (the break is left paused, so it will not auto-start the next work session; resuming the break still opens the Breather). The panel shows the run's progress ("Rounds: 2 / 4 done"). `0` (the default) means off — run without a limit. A skipped work session counts as a round, the same way it counts for the chime. The count is in-memory: it resets when a run completes, when the daemon restarts, when the shell restarts, and when the day changes (sessions_today drops) — so a run stopped partway through yesterday starts fresh today, but stopping partway through a run and coming back later the same day picks up where it left off.
+`rounds` stops the timer after that many work sessions in a run — set it to `4` and the timer stops after the fourth work session ends (the break is left paused, so it will not auto-start the next work session; resuming the break still opens the Breather). The panel shows the run's progress ("Rounds: 2 / 4 done"). `0` (the default) means off — run without a limit. A skipped work session counts as a round, the same way it counts for the chime. The count is in-memory: it resets when a run completes, when the daemon restarts, when the shell restarts, and when the day changes (sessions_today drops) — so a run stopped partway through yesterday starts fresh today, but stopping partway through a run and coming back later the same day picks up where it left off. Set it in the panel (Durations section, "Rounds" slider, 0–12, 0 is off) or in `focusd.json`:
 
 ```json
 { "rounds": 4 }

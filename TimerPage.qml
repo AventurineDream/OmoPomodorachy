@@ -337,8 +337,23 @@ Item {
         }
       }
 
+      // Rounds: how many work sessions run before the timer stops.
+      // 0 is off — run without a limit. Written to focusd.json on release.
+      DurationRow {
+        label: "Rounds"
+        minimum: 0
+        maximum: 12
+        minutes: root.timerService ? root.timerService.rounds : 0
+        suffix: ""
+        zeroText: "off"
+        onReleased: function (v) {
+          if (root.timerService)
+            root.timerService.writeRounds(v);
+        }
+      }
+
       Text {
-        text: "Applies from the next session of that type."
+        text: "Applies from the next session of that type. Rounds: 0 is off."
         color: root.foreground
         opacity: 0.5
         font.family: root.fontFamily
@@ -516,6 +531,11 @@ Item {
     property int minimum: 1
     property int maximum: 60
     property int minutes: 0
+    // Suffix for the value text (" min" for durations). zeroText, when
+    // set, is shown instead when the value is 0 (the Rounds slider uses
+    // it for "off").
+    property string suffix: " min"
+    property string zeroText: ""
 
     signal released(real value)
 
@@ -545,7 +565,7 @@ Item {
     }
 
     Text {
-      text: Math.round(durationSlider.liveValue) + " min"
+      text: (parent.zeroText && Math.round(durationSlider.liveValue) === 0) ? parent.zeroText : (Math.round(durationSlider.liveValue) + parent.suffix)
       color: root.foreground
       font.family: root.fontFamily
       font.pixelSize: Style.font.bodySmall
