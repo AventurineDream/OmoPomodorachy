@@ -191,6 +191,11 @@ Item {
   readonly property string focusdJsonPath: Quickshell.env("HOME") + "/.config/omarchy/focusd.json"
   property string configRaw: ""
   property bool configApplied: false
+  // True only when the last focusd.json read succeeded and the text
+  // parsed (or was empty — no file yet, nothing to lose). writeRounds
+  // refuses to write while this is false: a failed read or an invalid
+  // file parses to {}, and writing from that would wipe the other keys.
+  property bool configOk: false
 
   function killProc(proc) {
     try {
@@ -219,28 +224,37 @@ Item {
     root.configRaw = next;
     root.configApplied = true;
     root.fileConfig = root.parseFileConfig(next);
+    root.configOk = ok && Model.configTextOk(next);
     root.configure();
   }
 
   // A Rounds slider release writes only the rounds key to focusd.json,
-  // built from the last-read config so the other keys are kept. The
-  // file is written only by this plugin (and a hand edit), so there is
-  // no programmatic writer to race the way the focusd TUI races
-  // config.toml — a direct write from the cached config is safe here.
-  // The 10s poll re-reads the file and confirms the write; if it
-  // failed, the slider snaps back to the file's value.
+  // built from the last-read config so the other keys are kept. Two
+  // guards: the write is refused while the last read failed or the file
+  // is invalid (configOk false — the cached config is {} then, and
+  // writing from it would wipe the other keys), and the cached config
+  // is updated with the new value so a second move compares against the
+  // value just written instead of the stale one. The file is written
+  // only by this plugin (and a hand edit), so there is no programmatic
+  // writer to race the way the focusd TUI races config.toml. The 10s
+  // poll re-reads the file and confirms the write; if it failed, the
+  // slider snaps back to the file's value.
   function writeRounds(value) {
     var v = Model.clampRounds(value);
     if (v === null)
       return;
-    root.rounds = v;
+    if (!root.configOk)
+      return;
     var cfg = root.fileConfig || {};
     // Skip the write when the file already has this value (e.g. the
     // slider was released without moving).
     if (cfg.rounds === v)
       return;
+    cfg.rounds = v;
+    root.rounds = v;
     var updated = Model.setJsonKey(JSON.stringify(cfg), "rounds", v);
     root.configRaw = updated;
+    root.fileConfig = cfg;
     Quickshell.execDetached(["bash", root.writeScriptPath, "--create", root.focusdJsonPath, updated]);
   }
 
