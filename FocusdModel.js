@@ -196,12 +196,37 @@ function updateDuration(tomlText, kind, value) {
   if (!matched) return null
   return text.slice(0, section.start) + body + text.slice(section.end)
 }
-// on the first poll where the break is running. launchedFor is the session
-// key the Breather already launched for ("" if none this break). A break
-// that starts paused does not launch until the user resumes it, and
-// pause/resume mid-break does not relaunch. minutes is the break's
-// remaining time in whole minutes; 0 means unknown, so no launch. An
-// empty breakPattern turns the link off.
+
+// ---- Rounds before stop (Phase 4) ----
+// A run is a sequence of work sessions. `rounds` (0 = off, unlimited) is
+// how many work sessions run before the timer stops. The count is
+// in-memory: it resets when a run completes or the daemon restarts.
+
+// Rounds, clamped to 0 (off) .. 12. Null when the value is not a number.
+function clampRounds(value) {
+  var n = Number(value)
+  if (!isFinite(n)) return null
+  return Math.max(0, Math.min(12, Math.round(n)))
+}
+
+// True when a work session ended into a break — the same edge as the
+// chime, restricted to work. A skipped work session counts (the chime
+// treats a skip as a session change too).
+function workSessionEnded(prevSession, prevStatus, nextSession) {
+  return sessionEnded(prevSession, prevStatus, nextSession) && prevSession === "work" && isBreakSession(nextSession)
+}
+
+// True when the run has reached its round limit (rounds 0 means off).
+function shouldStopAfterRound(rounds, roundsCompleted) {
+  return rounds > 0 && roundsCompleted >= rounds
+}
+
+// Launch the Breather once per break, on the first poll where the break is
+// running. launchedFor is the session key the Breather already launched for
+// ("" if none this break). A break that starts paused does not launch until
+// the user resumes it, and pause/resume mid-break does not relaunch. minutes
+// is the break's remaining time in whole minutes; 0 means unknown, so no
+// launch. An empty breakPattern turns the link off.
 function shouldLaunchBreather(sessionKey, status, launchedFor, breakPattern, minutes) {
   if (!breakPattern) return false
   if (!isBreakSession(sessionKey)) return false

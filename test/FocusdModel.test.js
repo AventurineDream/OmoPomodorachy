@@ -6,7 +6,7 @@ const os = require("os");
 const { execFileSync } = require("child_process");
 const src = fs.readFileSync(path.join(__dirname, "..", "FocusdModel.js"), "utf8");
 const factory = new Function(
-  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, updateDuration };"
+  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, updateDuration, clampRounds, workSessionEnded, shouldStopAfterRound };"
 );
 const M = factory();
 
@@ -206,5 +206,20 @@ check("clampDuration long 5..60", M.clampDuration("longBreak", 4) === 5 && M.cla
 check("clampDuration rounds", M.clampDuration("work", 25.6) === 26);
 check("clampDuration unknown kind is null", M.clampDuration("nope", 5) === null);
 check("clampDuration non-numeric is null", M.clampDuration("work", "abc") === null);
+
+// --- Rounds before stop ---
+check("workSessionEnded: work -> short-break (running) ends a round", M.workSessionEnded("work", "running", "short-break") === true);
+check("workSessionEnded: work -> long-break (running) ends a round", M.workSessionEnded("work", "running", "long-break") === true);
+check("workSessionEnded: work -> work is not a round", M.workSessionEnded("work", "running", "work") === false);
+check("workSessionEnded: break -> work is not a round", M.workSessionEnded("short-break", "running", "work") === false);
+check("workSessionEnded: paused work -> break is not a round", M.workSessionEnded("work", "paused", "short-break") === false);
+check("workSessionEnded: first poll (no prev) is not a round", M.workSessionEnded("", "", "short-break") === false);
+check("shouldStopAfterRound: off (0) never stops", M.shouldStopAfterRound(0, 99) === false);
+check("shouldStopAfterRound: 3 of 4 does not stop", M.shouldStopAfterRound(4, 3) === false);
+check("shouldStopAfterRound: 4 of 4 stops", M.shouldStopAfterRound(4, 4) === true);
+check("shouldStopAfterRound: over the limit stops", M.shouldStopAfterRound(4, 5) === true);
+check("clampRounds 0..12", M.clampRounds(0) === 0 && M.clampRounds(1) === 1 && M.clampRounds(12) === 12 && M.clampRounds(13) === 12 && M.clampRounds(-1) === 0);
+check("clampRounds rounds", M.clampRounds(4.6) === 5);
+check("clampRounds non-numeric is null", M.clampRounds("abc") === null);
 
 console.log(`FocusdModel tests: ${pass} passed${process.exitCode ? " (WITH FAILURES)" : ""}`);
