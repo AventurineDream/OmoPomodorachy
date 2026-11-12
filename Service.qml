@@ -48,6 +48,37 @@ Item {
   property int longBreakMinutes: 15
   property string durationsRaw: ""
   property bool durationsApplied: false
+  // A slider release is waiting on a fresh re-read of the TOML. The
+  // cached text can be up to 10s old, and a change made in the focusd
+  // TUI inside that window would be overwritten if the write used it.
+  property bool pendingWrite: false
+
+  // Rounds before stop (Phase 4). `rounds` is how many work sessions run
+  // before the timer stops (0 = off, unlimited); `roundsCompleted` is how
+  // many work sessions this run has finished. The count is in-memory and
+  // resets when a run completes or the daemon restarts. Set in
+  // configure() from ~/.config/omarchy/focusd.json.
+  property int rounds: 0
+  property int roundsCompleted: 0
+
+  // Block tagging (Phase 5). `tags` is the category list from
+  // focusd.json; `currentTag` is the tag for the current/next work block,
+  // picked in the panel. Completed work blocks are recorded in
+  // ~/.config/omarchy/focusd-sessions.json (one { date, tag, minutes }
+  // entry per block) — the source Phase 6 exports to the Obsidian log.
+  // `lastWorkSession` is the most recent completed block, for the panel's
+  // Last row (tap its tag to fix it afterwards). The log is re-read on
+  // the 10s poll, so a hand edit shows up; only this plugin writes it.
+  property var tags: Model.DEFAULT_TAGS.slice()
+  property string currentTag: "Work"
+  property var lastWorkSession: null
+  property var sessionLog: []
+  readonly property string sessionsPath: Quickshell.env("HOME") + "/.config/omarchy/focusd-sessions.json"
+  property string sessionsRaw: ""
+  property bool sessionsApplied: false
+  // The remaining time at the previous status poll, in seconds — the
+  // work block's length is measured from it when the block ends.
+  property int prevRemainingSecs: 0
 
   property int sessionsToday: 0
   property string focusedToday: "0s"
@@ -101,6 +132,18 @@ Item {
     // empty pattern turns the link off. "box" is the default.
     var bp = root.fileConfig && root.fileConfig.breakPattern;
     root.breakPattern = (bp === undefined || bp === null) ? "box" : String(bp);
+    // Rounds before stop: how many work sessions run before the timer
+    // stops. 0 (the default) means off — run without a limit.
+    var r = root.fileConfig && root.fileConfig.rounds;
+    var clamped = (r === undefined || r === null) ? 0 : Model.clampRounds(r);
+    root.rounds = clamped === null ? 0 : clamped;
+    // Block tags (Phase 5): the category list for work blocks, from
+    // focusd.json. Anything else (or nothing) is the default five. If the
+    // current tag is not in the list anymore, fall back to the first.
+    var tg = root.fileConfig && root.fileConfig.tags;
+    root.tags = Model.parseTags(tg);
+    if (root.tags.indexOf(root.currentTag) === -1)
+      root.currentTag = root.tags[0];
   }
   property var fileConfig: ({})
   function parseFileConfig(raw) {
@@ -183,6 +226,24 @@ Item {
 
   function applyDurations(ok, raw) {
     var next = ok ? String(raw || "") : "";
+    if (root.pendingWrite) {
+      // A slider release is waiting on this fresh read. Use the fresh
+      // text only as the base for the write — do not let it overwrite the
+      // slider's values (they are newer than the file). If the read
+      // failed, write nothing; the next poll snaps the sliders back.
+      root.pendingWrite = false;
+      if (ok) {
+        var updated = Model.updateDurations(next, root.workMinutes, root.shortBreakMinutes, root.longBreakMinutes);
+        if (updated !== null) {
+          root.durationsRaw = updated;
+          // Run through bash explicitly: the script's executable bit does
+          // not survive a push through the GitHub API, and bash reads it
+          // either way.
+          Quickshell.execDetached(["bash", root.writeScriptPath, root.focusdConfigPath, updated]);
+        }
+      }
+      return;
+    }
     if (next === root.durationsRaw && root.durationsApplied)
       return;
     root.durationsRaw = next;
@@ -196,19 +257,15 @@ Item {
     root.longBreakMinutes = parsed.longBreak;
   }
 
-  // Write the current slider durations to the active preset in
-  // config.toml. The 10s poll re-reads the file and confirms the write;
-  // if it failed, the sliders snap back to the file's values.
+  // A slider release re-reads config.toml fresh, then writes the new
+  // durations on top of that fresh text (in applyDurations). The cached
+  // text can be up to 10s old, so writing from it could overwrite a
+  // change made in the focusd TUI in that window. The 10s poll re-reads
+  // the file and confirms the write; if it failed, the sliders snap back
+  // to the file's values.
   function writeDurations() {
-    if (!root.durationsRaw)
-      return;
-    var next = Model.updateDurations(root.durationsRaw, root.workMinutes, root.shortBreakMinutes, root.longBreakMinutes);
-    if (next === null)
-      return;
-    root.durationsRaw = next;
-    // Run through bash explicitly: the script's executable bit does not
-    // survive a push through the GitHub API, and bash reads it either way.
-    Quickshell.execDetached(["bash", root.writeScriptPath, root.focusdConfigPath, next]);
+    root.pendingWrite = true;
+    root.loadDurations();
   }
 
   Timer {
@@ -225,6 +282,70 @@ Item {
     }
   }
 
+  // Sessions log: read the completed-work-blocks log (same read-config
+  // helper and 10s poll as the plugin config). Only re-parses when the
+  // file's text changed. A missing file is an empty log — the file is
+  // created on the first block (write-config creates it). An unparseable
+  // file keeps the last good log.
+  function loadSessions() {
+    if (sessionsProc.running)
+      return;
+    sessionsProc.collected = "";
+    sessionsProc.collectedBytes = 0;
+    sessionsProc.overflowed = false;
+    sessionsProc.timedOut = false;
+    sessionsProc.command = [root.readScriptPath, root.sessionsPath, String(root.maxConfigBytes)];
+    sessionsWatchdog.restart();
+    sessionsProc.running = true;
+  }
+
+  function applySessions(ok, raw) {
+    var next = ok ? String(raw || "") : "";
+    if (next === root.sessionsRaw && root.sessionsApplied)
+      return;
+    root.sessionsRaw = next;
+    root.sessionsApplied = true;
+    var log = Model.parseSessionLog(next);
+    root.sessionLog = log;
+    root.lastWorkSession = log.length ? log[log.length - 1] : null;
+  }
+
+  // Block tagging: pick the tag for the current/next work block.
+  function setCurrentTag(tag) {
+    if (root.tags.indexOf(tag) !== -1)
+      root.currentTag = tag;
+  }
+
+  // Fix the last completed block's tag afterwards: cycle it to the next
+  // category and rewrite the log. Nothing to fix when no block has
+  // completed yet.
+  function cycleLastTag() {
+    if (!root.lastWorkSession)
+      return;
+    var next = Model.nextTag(root.tags, root.lastWorkSession.tag);
+    var logText = Model.retagSessionLog(root.sessionsRaw, next);
+    if (logText === null)
+      return;
+    root.sessionsRaw = logText;
+    root.sessionLog = Model.parseSessionLog(logText);
+    root.lastWorkSession = root.sessionLog.length ? root.sessionLog[root.sessionLog.length - 1] : null;
+    Quickshell.execDetached(["bash", root.writeScriptPath, root.sessionsPath, logText]);
+  }
+
+  Timer {
+    id: sessionsWatchdog
+    interval: root.configTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (sessionsProc.running) {
+        sessionsProc.timedOut = true;
+        sessionsProc.collected = "";
+        sessionsProc.collectedBytes = 0;
+        root.killProc(sessionsProc);
+      }
+    }
+  }
+
   Timer {
     id: configPoll
     interval: 10000
@@ -233,6 +354,7 @@ Item {
     onTriggered: {
       root.loadConfig();
       root.loadDurations();
+      root.loadSessions();
     }
   }
 
@@ -280,6 +402,53 @@ Item {
       durationsProc.overflowed = false;
       durationsProc.timedOut = false;
       root.applyDurations(ok, output);
+    }
+  }
+
+  Process {
+    id: sessionsProc
+    property string collected: ""
+    property int collectedBytes: 0
+    property bool overflowed: false
+    property bool timedOut: false
+    stdout: SplitParser {
+      onRead: function (data) {
+        if (sessionsProc.overflowed || sessionsProc.timedOut)
+          return;
+        var chunk = String(data + "\n");
+        if (sessionsProc.collectedBytes + chunk.length > root.maxConfigBytes) {
+          sessionsProc.overflowed = true;
+          sessionsProc.collected = "";
+          sessionsProc.collectedBytes = 0;
+          root.killProc(sessionsProc);
+          return;
+        }
+        sessionsProc.collected += chunk;
+        sessionsProc.collectedBytes += chunk.length;
+      }
+    }
+    stderr: SplitParser {
+      onRead: function (data) {
+        if (sessionsProc.overflowed || sessionsProc.timedOut)
+          return;
+        sessionsProc.collectedBytes += String(data + "\n").length;
+        if (sessionsProc.collectedBytes > root.maxConfigBytes) {
+          sessionsProc.overflowed = true;
+          sessionsProc.collected = "";
+          sessionsProc.collectedBytes = 0;
+          root.killProc(sessionsProc);
+        }
+      }
+    }
+    onExited: function (exitCode) {
+      sessionsWatchdog.stop();
+      var ok = !sessionsProc.overflowed && !sessionsProc.timedOut && exitCode === 0;
+      var output = String(sessionsProc.collected);
+      sessionsProc.collected = "";
+      sessionsProc.collectedBytes = 0;
+      sessionsProc.overflowed = false;
+      sessionsProc.timedOut = false;
+      root.applySessions(ok, output);
     }
   }
 
@@ -411,9 +580,11 @@ Item {
       status = "stopped";
       // No timer to chime from: clear the previous session so the next
       // session the daemon reports (it restarts as Work) reads as a first
-      // poll, not as a session ending.
+      // poll, not as a session ending. The run is over too.
       root.prevSession = "";
       root.prevStatus = "";
+      root.prevRemainingSecs = 0;
+      root.roundsCompleted = 0;
       return;
     }
     var state = {};
@@ -424,6 +595,8 @@ Item {
       status = "stopped";
       root.prevSession = "";
       root.prevStatus = "";
+      root.prevRemainingSecs = 0;
+      root.roundsCompleted = 0;
       return;
     }
     var classes = state.class || [];
@@ -438,6 +611,33 @@ Item {
     // never chimes either.
     if (Model.shouldChime(root.prevSession, root.prevStatus, sessionKey, root.soundsEnabled))
       Quickshell.execDetached(Model.chimeCommand(Model.resolveSoundFile(root.soundFile)));
+    // Rounds: a work session ending into a break completes a round. When
+    // the run reaches the configured number of rounds, stop the timer
+    // (reset the break to paused) and start a fresh run. The Breather is
+    // not launched for the break that ends the run — it would count down
+    // while the break sits paused; resuming the break launches it instead.
+    // (The chime above still fires: the work session did end.)
+    var runEnded = false;
+    if (Model.workSessionEnded(root.prevSession, root.prevStatus, sessionKey)) {
+      root.roundsCompleted += 1;
+      // Block tagging: record the finished work block — its tag and the
+      // minutes actually spent — in the session log, and show it as the
+      // Last block in the panel. A skipped block is logged with the
+      // elapsed minutes, not the full length. (The write goes through
+      // write-config, which creates the log file on the first block.)
+      var blockMinutes = Model.elapsedMinutes(root.workMinutes, root.prevRemainingSecs);
+      var entry = { date: Qt.formatDate(new Date(), "yyyy-MM-dd"), tag: root.currentTag, minutes: blockMinutes };
+      var logText = Model.appendSessionLog(root.sessionsRaw, entry);
+      root.sessionsRaw = logText;
+      root.sessionLog = Model.parseSessionLog(logText);
+      root.lastWorkSession = entry;
+      Quickshell.execDetached(["bash", root.writeScriptPath, root.sessionsPath, logText]);
+      if (Model.shouldStopAfterRound(root.rounds, root.roundsCompleted)) {
+        runEnded = true;
+        root.roundsCompleted = 0;
+        Quickshell.execDetached(["focusd", "reset"]);
+      }
+    }
     // Breather link: launch once per break, on the first poll where the
     // break is running. A break that starts paused does not launch until
     // the user resumes it; pause/resume mid-break does not relaunch. The
@@ -446,7 +646,7 @@ Item {
     // session-ended edge; the Breather has its own rule.)
     if (sessionKey === "work") {
       root.breatherLaunchedFor = "";
-    } else {
+    } else if (!runEnded) {
       var breakMinutes = Model.parseMinutes(state.text);
       if (Model.shouldLaunchBreather(sessionKey, newStatus, root.breatherLaunchedFor, root.breakPattern, breakMinutes)) {
         root.breatherLaunchedFor = sessionKey;
@@ -455,6 +655,9 @@ Item {
     }
     root.prevSession = sessionKey;
     root.prevStatus = newStatus;
+    // The remaining time on this poll is what the next poll measures a
+    // session's length against, if that session ends there.
+    root.prevRemainingSecs = Model.parseSeconds(state.text);
     root.status = newStatus;
     root.session = sessionKey;
     root.sessionLabel = sessionLabelFor(sessionKey);
@@ -540,6 +743,7 @@ Item {
     root.checkVersion();
     root.loadConfig();
     root.loadDurations();
+    root.loadSessions();
   }
   Component.onDestruction: {
     if (FocusdShared.ServiceBridge.service === root)
