@@ -48,6 +48,10 @@ Item {
   property int longBreakMinutes: 15
   property string durationsRaw: ""
   property bool durationsApplied: false
+  // A slider release is waiting on a fresh re-read of the TOML. The
+  // cached text can be up to 10s old, and a change made in the focusd
+  // TUI inside that window would be overwritten if the write used it.
+  property bool pendingWrite: false
 
   property int sessionsToday: 0
   property string focusedToday: "0s"
@@ -183,6 +187,24 @@ Item {
 
   function applyDurations(ok, raw) {
     var next = ok ? String(raw || "") : "";
+    if (root.pendingWrite) {
+      // A slider release is waiting on this fresh read. Use the fresh
+      // text only as the base for the write — do not let it overwrite the
+      // slider's values (they are newer than the file). If the read
+      // failed, write nothing; the next poll snaps the sliders back.
+      root.pendingWrite = false;
+      if (ok) {
+        var updated = Model.updateDurations(next, root.workMinutes, root.shortBreakMinutes, root.longBreakMinutes);
+        if (updated !== null) {
+          root.durationsRaw = updated;
+          // Run through bash explicitly: the script's executable bit does
+          // not survive a push through the GitHub API, and bash reads it
+          // either way.
+          Quickshell.execDetached(["bash", root.writeScriptPath, root.focusdConfigPath, updated]);
+        }
+      }
+      return;
+    }
     if (next === root.durationsRaw && root.durationsApplied)
       return;
     root.durationsRaw = next;
@@ -196,19 +218,15 @@ Item {
     root.longBreakMinutes = parsed.longBreak;
   }
 
-  // Write the current slider durations to the active preset in
-  // config.toml. The 10s poll re-reads the file and confirms the write;
-  // if it failed, the sliders snap back to the file's values.
+  // A slider release re-reads config.toml fresh, then writes the new
+  // durations on top of that fresh text (in applyDurations). The cached
+  // text can be up to 10s old, so writing from it could overwrite a
+  // change made in the focusd TUI in that window. The 10s poll re-reads
+  // the file and confirms the write; if it failed, the sliders snap back
+  // to the file's values.
   function writeDurations() {
-    if (!root.durationsRaw)
-      return;
-    var next = Model.updateDurations(root.durationsRaw, root.workMinutes, root.shortBreakMinutes, root.longBreakMinutes);
-    if (next === null)
-      return;
-    root.durationsRaw = next;
-    // Run through bash explicitly: the script's executable bit does not
-    // survive a push through the GitHub API, and bash reads it either way.
-    Quickshell.execDetached(["bash", root.writeScriptPath, root.focusdConfigPath, next]);
+    root.pendingWrite = true;
+    root.loadDurations();
   }
 
   Timer {
