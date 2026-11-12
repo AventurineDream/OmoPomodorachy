@@ -30,6 +30,10 @@ Item {
   property string prevStatus: ""
   property bool soundsEnabled: true
   property string soundFile: Model.DEFAULT_SOUND
+  // Breather link. breakPattern is the pattern the Breather opens with
+  // when a break starts ("box" by default); an empty pattern turns the
+  // link off. Set in configure() from ~/.config/omarchy/focusd.json.
+  property string breakPattern: "box"
 
   property int sessionsToday: 0
   property string focusedToday: "0s"
@@ -79,6 +83,10 @@ Item {
     root.soundsEnabled = !root.fileConfig || root.fileConfig.sounds !== false;
     var sf = root.fileConfig && root.fileConfig.soundFile;
     root.soundFile = sf ? String(sf) : Model.DEFAULT_SOUND;
+    // Breather link: a pattern name launches the Breather on breaks; an
+    // empty pattern turns the link off. "box" is the default.
+    var bp = root.fileConfig && root.fileConfig.breakPattern;
+    root.breakPattern = (bp === undefined || bp === null) ? "box" : String(bp);
   }
   property var fileConfig: ({})
   function parseFileConfig(raw) {
@@ -302,6 +310,12 @@ Item {
     // never chimes either.
     if (Model.shouldChime(root.prevSession, root.prevStatus, sessionKey, root.soundsEnabled))
       Quickshell.execDetached(Model.chimeCommand(Model.resolveSoundFile(root.soundFile)));
+    // A break starting launches the Breather with her chosen pattern, for
+    // the break's remaining time (state.text, the status's remaining-time
+    // field at the transition). Same edge as the chime — only a session
+    // that was running ending into a break — and only when a pattern is set.
+    if (root.breakPattern && Model.sessionEnded(root.prevSession, root.prevStatus, sessionKey) && Model.isBreakSession(sessionKey))
+      Quickshell.execDetached(Model.breatherCommand(root.breakPattern, Model.parseMinutes(state.text)));
     root.prevSession = sessionKey;
     root.prevStatus = newStatus;
     root.status = newStatus;

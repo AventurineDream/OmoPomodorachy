@@ -79,6 +79,12 @@ Default configuration:
 { "sounds": true, "soundFile": "complete.oga" }
 ```
 
+`breakPattern` links the timer to Terminal-Breather: when a break starts, the Breather overlay opens with that pattern, for the break's remaining time. Any pattern works — the built-ins (`box`, `478`, `coherent`) and your customs from `~/.config/omarchy/zen/patterns.json` (for example `slow-6`, `calm-466`, `breath-of-fire`). Set it to `""` to turn the link off:
+
+```json
+{ "breakPattern": "478" }
+```
+
 ```json
 "bar": {
   "layout": {
