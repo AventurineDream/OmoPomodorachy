@@ -345,6 +345,91 @@ Item {
         font.pixelSize: Style.font.bodySmall
       }
     }
+
+    // Block tagging: pick a category for the next/current work block,
+    // and fix the tag of the block that just ended.
+    Column {
+      width: parent.width
+      spacing: Style.space(10)
+
+      Rectangle {
+        width: parent.width
+        height: 1
+        color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+      }
+
+      Text {
+        text: "Tag this block"
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Flow {
+        width: parent.width
+        spacing: Style.space(8)
+
+        Repeater {
+          model: root.timerService ? root.timerService.tags : []
+
+          Button {
+            required property string modelData
+            text: modelData
+            foreground: root.foreground
+            accent: root.activeColor
+            fontFamily: root.fontFamily
+            fontSize: Style.font.bodySmall
+            // The selected tag reads as the active one.
+            opacity: root.timerService && root.timerService.currentTag === modelData ? 1 : 0.55
+            onClicked: if (root.timerService)
+              root.timerService.setCurrentTag(modelData)
+          }
+        }
+      }
+
+      Row {
+        visible: root.timerService ? !!root.timerService.lastWorkSession : false
+        width: parent.width
+        spacing: Style.space(8)
+
+        Text {
+          text: "Last:"
+          color: root.foreground
+          opacity: 0.6
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+
+        Button {
+          text: root.timerService && root.timerService.lastWorkSession ? root.timerService.lastWorkSession.tag : ""
+          foreground: root.foreground
+          accent: root.activeColor
+          fontFamily: root.fontFamily
+          fontSize: Style.font.bodySmall
+          onClicked: if (root.timerService)
+            root.timerService.cycleLastTag()
+        }
+
+        Text {
+          text: root.timerService && root.timerService.lastWorkSession ? ("· " + root.timerService.lastWorkSession.minutes + " min · " + root.timerService.lastWorkSession.date) : ""
+          color: root.foreground
+          opacity: 0.6
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+      }
+
+      Text {
+        text: "Tags the next work block. Tap Last to fix the one that just ended."
+        color: root.foreground
+        opacity: 0.5
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        wrapMode: Text.Wrap
+        // Leave room for the info button in the panel's bottom-right corner.
+        width: parent.width - Style.space(36)
+      }
+    }
   }
 
   Item {

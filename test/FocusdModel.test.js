@@ -6,7 +6,7 @@ const os = require("os");
 const { execFileSync } = require("child_process");
 const src = fs.readFileSync(path.join(__dirname, "..", "FocusdModel.js"), "utf8");
 const factory = new Function(
-  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, updateDuration, clampRounds, workSessionEnded, shouldStopAfterRound };"
+  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, updateDuration, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag };"
 );
 const M = factory();
 
@@ -221,5 +221,59 @@ check("shouldStopAfterRound: over the limit stops", M.shouldStopAfterRound(4, 5)
 check("clampRounds 0..12", M.clampRounds(0) === 0 && M.clampRounds(1) === 1 && M.clampRounds(12) === 12 && M.clampRounds(13) === 12 && M.clampRounds(-1) === 0);
 check("clampRounds rounds", M.clampRounds(4.6) === 5);
 check("clampRounds non-numeric is null", M.clampRounds("abc") === null);
+
+// --- Block tagging ---
+check("DEFAULT_TAGS has the five starters", JSON.stringify(M.DEFAULT_TAGS) === JSON.stringify(["Work", "Study", "Art", "Admin", "Other"]));
+check("parseTags: missing is the default", JSON.stringify(M.parseTags(undefined)) === JSON.stringify(M.DEFAULT_TAGS));
+check("parseTags: null is the default", JSON.stringify(M.parseTags(null)) === JSON.stringify(M.DEFAULT_TAGS));
+check("parseTags: a list passes through", JSON.stringify(M.parseTags(["Art", "Study"])) === JSON.stringify(["Art", "Study"]));
+check("parseTags: a single string is one tag", JSON.stringify(M.parseTags("Art")) === JSON.stringify(["Art"]));
+check("parseTags: blanks are dropped", JSON.stringify(M.parseTags(["Art", "", "  ", "Study"])) === JSON.stringify(["Art", "Study"]));
+check("parseTags: entries are trimmed", JSON.stringify(M.parseTags(["  Art  "])) === JSON.stringify(["Art"]));
+check("parseTags: duplicates are dropped", JSON.stringify(M.parseTags(["Art", "Art", "Study"])) === JSON.stringify(["Art", "Study"]));
+check("parseTags: an empty list is the default", JSON.stringify(M.parseTags([])) === JSON.stringify(M.DEFAULT_TAGS));
+check("parseTags: a non-list, non-string is the default", JSON.stringify(M.parseTags(42)) === JSON.stringify(M.DEFAULT_TAGS));
+check("parseTags: a number inside the list is stringified", JSON.stringify(M.parseTags(["Art", 7])) === JSON.stringify(["Art", "7"]));
+
+check("parseSeconds: 25:00 is 1500", M.parseSeconds("25:00") === 1500);
+check("parseSeconds: 1:05:00 is 3900", M.parseSeconds("1:05:00") === 3900);
+check("parseSeconds: 00:03 is 3", M.parseSeconds("00:03") === 3);
+check("parseSeconds: empty is 0", M.parseSeconds("") === 0);
+check("parseSeconds: non-time is 0", M.parseSeconds("paused") === 0);
+check("parseSeconds: no colon is 0", M.parseSeconds("25") === 0);
+check("parseSeconds: negative is 0", M.parseSeconds("-1:00") === 0);
+
+check("elapsedMinutes: no previous poll is the full length", M.elapsedMinutes(25, 0) === 25);
+check("elapsedMinutes: a block that ran out is the full length", M.elapsedMinutes(25, 3) === 25);
+check("elapsedMinutes: a skip at 20:00 left is 5 elapsed", M.elapsedMinutes(25, 1200) === 5);
+check("elapsedMinutes: a skip just after starting is 1 (minimum)", M.elapsedMinutes(25, 1490) === 1);
+check("elapsedMinutes: more remaining than the length is 1", M.elapsedMinutes(25, 2000) === 1);
+check("elapsedMinutes: a 50-min block skipped at 10:00 left is 40", M.elapsedMinutes(50, 600) === 40);
+check("elapsedMinutes: non-numeric work length is 0", M.elapsedMinutes("abc", 0) === 0);
+
+const SAMPLE_LOG = JSON.stringify([
+  { date: "2026-11-11", tag: "Work", minutes: 25 },
+  { date: "2026-11-11", tag: "Art", minutes: 5 },
+], null, 2);
+check("parseSessionLog: reads entries", M.parseSessionLog(SAMPLE_LOG).length === 2 && M.parseSessionLog(SAMPLE_LOG)[1].tag === "Art");
+check("parseSessionLog: empty text is an empty log", M.parseSessionLog("").length === 0);
+check("parseSessionLog: invalid JSON is an empty log", M.parseSessionLog("{oops").length === 0);
+check("parseSessionLog: a non-array is an empty log", M.parseSessionLog('{"a":1}').length === 0);
+check("parseSessionLog: entries missing a field are dropped", M.parseSessionLog(JSON.stringify([{ date: "2026-11-11", tag: "Work" }, { date: "2026-11-11", tag: "Art", minutes: 5 }])).length === 1);
+check("parseSessionLog: a zero-minute entry is dropped", M.parseSessionLog(JSON.stringify([{ date: "2026-11-11", tag: "Work", minutes: 0 }])).length === 0);
+check("appendSessionLog: appends to an existing log", M.parseSessionLog(M.appendSessionLog(SAMPLE_LOG, { date: "2026-11-11", tag: "Study", minutes: 25 })).length === 3);
+check("appendSessionLog: output is compact JSON (one line)", M.appendSessionLog(SAMPLE_LOG, { date: "2026-11-11", tag: "Study", minutes: 25 }).indexOf("\n") === -1);
+check("appendSessionLog: compact output still parses back", M.parseSessionLog(M.appendSessionLog(SAMPLE_LOG, { date: "2026-11-11", tag: "Study", minutes: 25 })).length === 3);
+check("retagSessionLog: output is compact JSON (one line)", M.retagSessionLog(SAMPLE_LOG, "Study").indexOf("\n") === -1);
+check("appendSessionLog: a fresh log starts with the entry", M.parseSessionLog(M.appendSessionLog("", { date: "2026-11-11", tag: "Work", minutes: 25 })).length === 1);
+check("appendSessionLog: an invalid file is replaced with a fresh log", M.parseSessionLog(M.appendSessionLog("{oops", { date: "2026-11-11", tag: "Work", minutes: 25 })).length === 1);
+check("appendSessionLog: an invalid entry leaves the log unchanged", M.parseSessionLog(M.appendSessionLog(SAMPLE_LOG, { date: "2026-11-11", tag: "", minutes: 25 })).length === 2);
+check("retagSessionLog: changes the last entry's tag", M.parseSessionLog(M.retagSessionLog(SAMPLE_LOG, "Study"))[1].tag === "Study" && M.parseSessionLog(M.retagSessionLog(SAMPLE_LOG, "Study"))[0].tag === "Work");
+check("retagSessionLog: an empty log is null", M.retagSessionLog("", "Study") === null);
+check("retagSessionLog: an invalid log is null", M.retagSessionLog("{oops", "Study") === null);
+check("nextTag: cycles forward", M.nextTag(["Work", "Study", "Art"], "Work") === "Study");
+check("nextTag: wraps around", M.nextTag(["Work", "Study", "Art"], "Art") === "Work");
+check("nextTag: an unknown tag starts at the first", M.nextTag(["Work", "Study", "Art"], "Other") === "Work");
+check("nextTag: an empty list is empty", M.nextTag([], "Work") === "");
 
 console.log(`FocusdModel tests: ${pass} passed${process.exitCode ? " (WITH FAILURES)" : ""}`);

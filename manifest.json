@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "bibek.focusd",
   "name": "OmoPomodorachy",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "author": "Bibek Bhusal",
-  "description": "OmoPomodorachy — a fork of BibekBhusal0/omarchy-focusd: a pomodoro timer for the Omarchy bar with a gentle chime when a session ends, plus streak, daily goal, sessions, stats, history, and session progress visualization.",
+  "description": "OmoPomodorachy — a fork of BibekBhusal0/omarchy-focusd: a pomodoro timer for the Omarchy bar with a gentle chime when a session ends, block tagging, plus streak, daily goal, sessions, stats, history, and session progress visualization.",
   "homepage": "https://github.com/AventurineDream/OmoPomodorachy",
   "kinds": [
     "service",
