@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "FocusdModel.js" as Model
 import "shared" as FocusdShared
 
 Item {
@@ -18,6 +19,14 @@ Item {
   property string tooltipText: ""
 
   property bool installed: false
+
+  // Session-end chime. prevSession is the session key from the previous
+  // status poll ("" until the first poll lands, so the first thing the
+  // timer reports never chimes). soundsEnabled and soundFile come from
+  // ~/.config/omarchy/focusd.json via configure() below.
+  property string prevSession: ""
+  property bool soundsEnabled: true
+  property string soundFile: Model.DEFAULT_SOUND
 
   property int sessionsToday: 0
   property string focusedToday: "0s"
@@ -62,6 +71,11 @@ Item {
       if (custom[key] !== undefined)
         merged[key] = String(custom[key]);
     icons = merged;
+    // Sounds are on unless the config turns them off; a bare filename is
+    // resolved into the freedesktop theme by the model, a path is used as-is.
+    root.soundsEnabled = !root.fileConfig || root.fileConfig.sounds !== false;
+    var sf = root.fileConfig && root.fileConfig.soundFile;
+    root.soundFile = sf ? String(sf) : Model.DEFAULT_SOUND;
   }
   property var fileConfig: ({})
   function parseFileConfig(raw) {
@@ -268,8 +282,16 @@ Item {
     }
     var classes = state.class || [];
     var alt = String(state.alt || "work");
-    root.status = classes.indexOf("paused") !== -1 ? "paused" : "running";
+    var newStatus = classes.indexOf("paused") !== -1 ? "paused" : "running";
     var sessionKey = alt.replace(/-paused$/, "");
+    // A session ending is a session change: the previous session ran out
+    // (or was skipped) and the next one began. The chime fires once, on
+    // the poll that sees the change; pause and resume never change the
+    // session, so they stay silent.
+    if (Model.shouldChime(root.prevSession, sessionKey, root.soundsEnabled))
+      Quickshell.execDetached(Model.chimeCommand(Model.resolveSoundFile(root.soundFile)));
+    root.prevSession = sessionKey;
+    root.status = newStatus;
     root.session = sessionKey;
     root.sessionLabel = sessionLabelFor(sessionKey);
     root.nextSessionLabel = String(state.next_session || nextSessionLabelFor(sessionKey));

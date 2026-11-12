@@ -1,0 +1,48 @@
+// Pure helpers for OmoPomodorachy (fork of bibek.focusd). No QML, no I/O —
+// everything here is unit-tested by test/FocusdModel.test.js, and the
+// service (Service.qml) only calls these, never re-implements them.
+
+// ---- Session-end chime --------------------------------------------------
+// A chime when one session ends and the next begins. The service polls
+// `focusd status` once a second, so a session change is the session-end
+// event: the previous session ran out (or was skipped) and the next one
+// started. Pause and resume never change the session, so they never chime;
+// stopping leaves the session as it was, so it never chimes either.
+
+// A bare filename is resolved into the freedesktop sound theme; a path
+// (anything containing a slash) is used as-is.
+var FREEDESKTOP_SOUNDS = "/usr/share/sounds/freedesktop/stereo/"
+var DEFAULT_SOUND = "complete.oga"
+
+function resolveSoundFile(name) {
+  var n = String(name || "").trim()
+  if (!n) n = DEFAULT_SOUND
+  if (n.indexOf("/") !== -1) return n
+  return FREEDESKTOP_SOUNDS + n
+}
+
+// Argv for playing one sound file. The path travels as a positional arg
+// so it is data to the shell, never syntax. A missing file, or a machine
+// with no player, exits silently — a chime must never break the timer.
+function chimeCommand(soundFile) {
+  return [
+    "sh", "-c",
+    'f="$1"; [ -f "$f" ] || exit 0; ' +
+    'if command -v pw-play >/dev/null 2>&1; then exec pw-play "$f"; ' +
+    'elif command -v paplay >/dev/null 2>&1; then exec paplay "$f"; fi',
+    "sh", soundFile
+  ]
+}
+
+// Should this poll chime? prevSession/nextSession are the session keys
+// ("work", "short-break", "long-break") from the previous poll and this
+// one. Empty strings mean "no previous poll yet" (the service starts with
+// no history), which never chimes — the first thing the timer reports is
+// not a session ending. The status is deliberately not an input: pause and
+// resume never change the session, so they never chime on their own.
+function shouldChime(prevSession, nextSession, soundsEnabled) {
+  if (!soundsEnabled) return false
+  if (!prevSession || !nextSession) return false
+  if (prevSession === nextSession) return false
+  return true
+}

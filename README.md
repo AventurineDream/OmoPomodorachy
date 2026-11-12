@@ -73,6 +73,12 @@ Default configuration:
 
 `icons` overrides the per-state bar icons. Any of the keys above can be replaced:
 
+`sounds` plays a gentle chime when one session ends and the next begins (a work session running out, or a break ending). It stays silent on pause, resume, and stop. On by default; set it to `false` to turn it off. `soundFile` picks the chime — a bare filename is resolved into the freedesktop sound theme (`complete.oga` by default), a path is used as-is:
+
+```json
+{ "sounds": true, "soundFile": "complete.oga" }
+```
+
 ```json
 "bar": {
   "layout": {
