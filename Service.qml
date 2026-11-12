@@ -212,7 +212,7 @@ Item {
     configProc.collectedBytes = 0;
     configProc.overflowed = false;
     configProc.timedOut = false;
-    configProc.command = [root.readScriptPath, root.focusdJsonPath, String(root.maxConfigBytes)];
+    configProc.command = ["bash", root.readScriptPath, root.focusdJsonPath, String(root.maxConfigBytes)];
     configWatchdog.restart();
     configProc.running = true;
   }
@@ -304,7 +304,7 @@ Item {
     durationsProc.collectedBytes = 0;
     durationsProc.overflowed = false;
     durationsProc.timedOut = false;
-    durationsProc.command = [root.readScriptPath, root.focusdConfigPath, String(root.maxConfigBytes)];
+    durationsProc.command = ["bash", root.readScriptPath, root.focusdConfigPath, String(root.maxConfigBytes)];
     durationsWatchdog.restart();
     durationsProc.running = true;
   }
@@ -396,7 +396,7 @@ Item {
     sessionsProc.collectedBytes = 0;
     sessionsProc.overflowed = false;
     sessionsProc.timedOut = false;
-    sessionsProc.command = [root.readScriptPath, root.sessionsPath, String(root.sessionsMaxBytes)];
+    sessionsProc.command = ["bash", root.readScriptPath, root.sessionsPath, String(root.sessionsMaxBytes)];
     sessionsWatchdog.restart();
     sessionsProc.running = true;
   }
