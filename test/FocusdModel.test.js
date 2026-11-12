@@ -6,7 +6,7 @@ const os = require("os");
 const { execFileSync } = require("child_process");
 const src = fs.readFileSync(path.join(__dirname, "..", "FocusdModel.js"), "utf8");
 const factory = new Function(
-  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, updateDurations, clampRounds, workSessionEnded, shouldStopAfterRound };"
+  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, updateDuration, clampRounds, workSessionEnded, shouldStopAfterRound };"
 );
 const M = factory();
 
@@ -160,33 +160,45 @@ check("parseDurations: missing key is null", M.parseDurations(SAMPLE_TOML.replac
 check("parseDurations: no active_preset is null", M.parseDurations(SAMPLE_TOML.replace('active_preset = "pomodoro"\n', "")) === null);
 check("parseDurations: empty text is null", M.parseDurations("") === null);
 
-const updated = M.updateDurations(SAMPLE_TOML, 45, 8, 20);
-check("updateDurations returns text", typeof updated === "string");
+const updated = M.updateDuration(SAMPLE_TOML, "work", 45);
+check("updateDuration returns text", typeof updated === "string");
 const reparsed = M.parseDurations(updated);
-check("updateDurations writes work", reparsed && reparsed.work === 45);
-check("updateDurations writes short break", reparsed && reparsed.shortBreak === 8);
-check("updateDurations writes long break", reparsed && reparsed.longBreak === 20);
-check("updateDurations leaves deep_work alone", updated.includes("work_minutes = 50") && updated.includes("short_break_minutes = 10") && updated.includes("long_break_minutes = 30"));
-check("updateDurations preserves comments and other keys", updated.includes("# Which preset is currently active") && updated.includes("daily_goal_minutes = 0") && updated.includes("sessions_before_long_break = 4"));
-check("updateDurations preserves the commented preset", updated.includes("# [presets.study]") && updated.includes("# work_minutes = 45"));
-check("updateDurations clamps work to 90", M.parseDurations(M.updateDurations(SAMPLE_TOML, 200, 5, 15)).work === 90);
-check("updateDurations clamps short break to 1", M.parseDurations(M.updateDurations(SAMPLE_TOML, 25, 0, 15)).shortBreak === 1);
-check("updateDurations clamps long break to 60", M.parseDurations(M.updateDurations(SAMPLE_TOML, 25, 5, 999)).longBreak === 60);
-check("updateDurations: missing preset is null", M.updateDurations(SAMPLE_TOML.replace('[presets.pomodoro]', "[presets.other]"), 45, 8, 20) === null);
-check("updateDurations: non-numeric value is null", M.updateDurations(SAMPLE_TOML, "abc", 5, 15) === null);
-check("updateDurations: missing key is null", M.updateDurations(SAMPLE_TOML.replace("long_break_minutes = 15\n", ""), 45, 8, 20) === null);
+check("updateDuration writes work", reparsed && reparsed.work === 45);
+check("updateDuration leaves the other keys alone", reparsed && reparsed.shortBreak === 5 && reparsed.longBreak === 15);
+const updatedShort = M.updateDuration(SAMPLE_TOML, "shortBreak", 8);
+check("updateDuration writes short break", M.parseDurations(updatedShort).shortBreak === 8 && M.parseDurations(updatedShort).work === 25);
+const updatedLong = M.updateDuration(SAMPLE_TOML, "longBreak", 20);
+check("updateDuration writes long break", M.parseDurations(updatedLong).longBreak === 20 && M.parseDurations(updatedLong).work === 25);
+check("updateDuration leaves deep_work alone", updated.includes("work_minutes = 50") && updated.includes("short_break_minutes = 10") && updated.includes("long_break_minutes = 30"));
+check("updateDuration preserves comments and other keys", updated.includes("# Which preset is currently active") && updated.includes("daily_goal_minutes = 0") && updated.includes("sessions_before_long_break = 4"));
+check("updateDuration preserves the commented preset", updated.includes("# [presets.study]") && updated.includes("# work_minutes = 45"));
+check("updateDuration clamps work to 90", M.parseDurations(M.updateDuration(SAMPLE_TOML, "work", 200)).work === 90);
+check("updateDuration clamps short break to 1", M.parseDurations(M.updateDuration(SAMPLE_TOML, "shortBreak", 0)).shortBreak === 1);
+check("updateDuration clamps long break to 60", M.parseDurations(M.updateDuration(SAMPLE_TOML, "longBreak", 999)).longBreak === 60);
+check("updateDuration: missing preset is null", M.updateDuration(SAMPLE_TOML.replace('[presets.pomodoro]', "[presets.other]"), "work", 45) === null);
+check("updateDuration: non-numeric value is null", M.updateDuration(SAMPLE_TOML, "work", "abc") === null);
+check("updateDuration: missing key is null", M.updateDuration(SAMPLE_TOML.replace("long_break_minutes = 15\n", ""), "longBreak", 20) === null);
+check("updateDuration: unknown kind is null", M.updateDuration(SAMPLE_TOML, "nope", 45) === null);
+check("updateDuration: no change returns the text untouched", M.updateDuration(SAMPLE_TOML, "work", 25) === SAMPLE_TOML);
+
+// The review gap: a TUI change to one key must survive moving a different
+// slider. Only the released slider's key is ever passed in, so the other
+// keys are never written back — even when their slider values are stale.
+const TUI_CHANGED_TOML = SAMPLE_TOML.replace("work_minutes = 25", "work_minutes = 30");
+const afterShortMove = M.updateDuration(TUI_CHANGED_TOML, "shortBreak", 8);
+check("moving short break keeps a TUI work change", afterShortMove !== null && M.parseDurations(afterShortMove).work === 30 && M.parseDurations(afterShortMove).shortBreak === 8);
+const afterLongMove = M.updateDuration(TUI_CHANGED_TOML, "longBreak", 20);
+check("moving long break keeps a TUI work change", afterLongMove !== null && M.parseDurations(afterLongMove).work === 30 && M.parseDurations(afterLongMove).longBreak === 20);
 
 // An out-of-range preset value is left alone unless that slider moves.
 const OUT_OF_RANGE_TOML = SAMPLE_TOML.replace("work_minutes = 25", "work_minutes = 120").replace("long_break_minutes = 15", "long_break_minutes = 2");
 const oor = M.parseDurations(OUT_OF_RANGE_TOML);
 check("out-of-range values parse", oor && oor.work === 120 && oor.longBreak === 2);
-const oorMovedShort = M.updateDurations(OUT_OF_RANGE_TOML, 120, 8, 2);
+const oorMovedShort = M.updateDuration(OUT_OF_RANGE_TOML, "shortBreak", 8);
 check("moving short break leaves a 120-min work value alone", oorMovedShort !== null && M.parseDurations(oorMovedShort).work === 120 && M.parseDurations(oorMovedShort).shortBreak === 8);
 check("moving short break leaves a 2-min long break alone", oorMovedShort !== null && M.parseDurations(oorMovedShort).longBreak === 2);
-const oorMovedWork = M.updateDurations(OUT_OF_RANGE_TOML, 45, 5, 2);
+const oorMovedWork = M.updateDuration(OUT_OF_RANGE_TOML, "work", 45);
 check("moving work rewrites only work", oorMovedWork !== null && M.parseDurations(oorMovedWork).work === 45 && M.parseDurations(oorMovedWork).longBreak === 2);
-const oorUnchanged = M.updateDurations(OUT_OF_RANGE_TOML, 120, 5, 2);
-check("no change means the text is untouched", oorUnchanged === OUT_OF_RANGE_TOML);
 
 check("clampDuration work 5..90", M.clampDuration("work", 4) === 5 && M.clampDuration("work", 91) === 90 && M.clampDuration("work", 25) === 25);
 check("clampDuration short 1..30", M.clampDuration("shortBreak", 0) === 1 && M.clampDuration("shortBreak", 31) === 30);

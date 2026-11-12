@@ -35,8 +35,14 @@ Item {
   // link off. breatherLaunchedFor is the session key the Breather already
   // launched for, so a break launches once; it clears when a work session
   // starts. Set in configure() from ~/.config/omarchy/focusd.json.
+  // suppressBreatherUntilPaused holds the Breather off after a run ends:
+  // the run-end reset is async, so the break still reads running for a
+  // poll or two, and without this the Breather would launch for a break
+  // that is about to sit paused. It clears when a poll sees the break
+  // paused, so a later resume launches as intended.
   property string breakPattern: "box"
   property string breatherLaunchedFor: ""
+  property bool suppressBreatherUntilPaused: false
 
   // Variable timer lengths (Phase 3). Durations live in focusd's
   // config.toml, under the active preset; the sliders edit that preset.
@@ -51,15 +57,24 @@ Item {
   // A slider release is waiting on a fresh re-read of the TOML. The
   // cached text can be up to 10s old, and a change made in the focusd
   // TUI inside that window would be overwritten if the write used it.
+  // Only the released slider's key is written (pendingWriteKind/Value) —
+  // the other sliders may hold stale values, and passing those in would
+  // write them back over a TUI change to a different key.
   property bool pendingWrite: false
+  property string pendingWriteKind: ""
+  property int pendingWriteValue: 0
 
   // Rounds before stop (Phase 4). `rounds` is how many work sessions run
   // before the timer stops (0 = off, unlimited); `roundsCompleted` is how
-  // many work sessions this run has finished. The count is in-memory and
-  // resets when a run completes or the daemon restarts. Set in
-  // configure() from ~/.config/omarchy/focusd.json.
+  // many work sessions this run has finished. The count is in-memory: it
+  // resets when a run completes, when the daemon restarts, when the shell
+  // restarts, and when the day changes (sessions_today drops). Set in
+  // configure() from ~/.config/omarchy/focusd.json. prevSessionsToday is
+  // the last poll's sessions_today (-1 = unknown, e.g. after a daemon
+  // restart), used to spot the day change.
   property int rounds: 0
   property int roundsCompleted: 0
+  property int prevSessionsToday: -1
 
   property int sessionsToday: 0
   property string focusedToday: "0s"
@@ -201,14 +216,20 @@ Item {
   function applyDurations(ok, raw) {
     var next = ok ? String(raw || "") : "";
     if (root.pendingWrite) {
-      // A slider release is waiting on this fresh read. Use the fresh
-      // text only as the base for the write — do not let it overwrite the
-      // slider's values (they are newer than the file). If the read
-      // failed, write nothing; the next poll snaps the sliders back.
+      // A slider release is waiting on this fresh read. Only the released
+      // slider's key is written, on top of the fresh text — the other
+      // sliders may hold stale values (a change made in the focusd TUI
+      // inside the poll window), and passing those in would write them
+      // back over the TUI change. If the read failed, write nothing; the
+      // next poll snaps the sliders back. A write that changes nothing is
+      // skipped.
+      var kind = root.pendingWriteKind;
+      var value = root.pendingWriteValue;
       root.pendingWrite = false;
+      root.pendingWriteKind = "";
       if (ok) {
-        var updated = Model.updateDurations(next, root.workMinutes, root.shortBreakMinutes, root.longBreakMinutes);
-        if (updated !== null) {
+        var updated = Model.updateDuration(next, kind, value);
+        if (updated !== null && updated !== next) {
           root.durationsRaw = updated;
           // Run through bash explicitly: the script's executable bit does
           // not survive a push through the GitHub API, and bash reads it
@@ -231,13 +252,22 @@ Item {
     root.longBreakMinutes = parsed.longBreak;
   }
 
-  // A slider release re-reads config.toml fresh, then writes the new
-  // durations on top of that fresh text (in applyDurations). The cached
-  // text can be up to 10s old, so writing from it could overwrite a
-  // change made in the focusd TUI in that window. The 10s poll re-reads
-  // the file and confirms the write; if it failed, the sliders snap back
-  // to the file's values.
-  function writeDurations() {
+  // A slider release re-reads config.toml fresh, then writes only the
+  // released slider's key on top of that fresh text (in applyDurations).
+  // The cached text can be up to 10s old, so writing from it could
+  // overwrite a change made in the focusd TUI in that window — and the
+  // other sliders still hold their (now stale) values, so only the
+  // released key is ever passed in. The 10s poll re-reads the file and
+  // confirms the write; if it failed, the sliders snap back to the
+  // file's values.
+  function writeDurations(kind, value) {
+    var v = Math.round(Number(value));
+    if (kind === "work") root.workMinutes = v;
+    else if (kind === "shortBreak") root.shortBreakMinutes = v;
+    else if (kind === "longBreak") root.longBreakMinutes = v;
+    else return;
+    root.pendingWriteKind = kind;
+    root.pendingWriteValue = v;
     root.pendingWrite = true;
     root.loadDurations();
   }
@@ -446,6 +476,7 @@ Item {
       root.prevSession = "";
       root.prevStatus = "";
       root.roundsCompleted = 0;
+      root.prevSessionsToday = -1;
       return;
     }
     var state = {};
@@ -457,8 +488,18 @@ Item {
       root.prevSession = "";
       root.prevStatus = "";
       root.roundsCompleted = 0;
+      root.prevSessionsToday = -1;
       return;
     }
+    // A new day starts a new run: sessions_today drops (to 0) when the
+    // date changes, so a run stopped yesterday does not carry its count
+    // into today. (A manual focusd stop leaves the timer paused, not
+    // stopped, so it does not reset the count — the day boundary is the
+    // signal that the run is over.)
+    var sessionsTodayNow = Number(state.sessions_today) || 0;
+    if (root.prevSessionsToday >= 0 && sessionsTodayNow < root.prevSessionsToday)
+      root.roundsCompleted = 0;
+    root.prevSessionsToday = sessionsTodayNow;
     var classes = state.class || [];
     var alt = String(state.alt || "work");
     var newStatus = classes.indexOf("paused") !== -1 ? "paused" : "running";
@@ -483,9 +524,19 @@ Item {
       if (Model.shouldStopAfterRound(root.rounds, root.roundsCompleted)) {
         runEnded = true;
         root.roundsCompleted = 0;
+        // Hold the Breather off until a poll sees the break paused: the
+        // reset below is async, so the break still reads running for a
+        // poll or two, and the Breather would launch for a break that is
+        // about to sit paused.
+        root.suppressBreatherUntilPaused = true;
         Quickshell.execDetached(["focusd", "reset"]);
       }
     }
+    // The run-end reset is async. Until a poll sees the break paused,
+    // keep the Breather suppressed; once it reads paused, clear the flag
+    // so a later resume launches as intended.
+    if (Model.isBreakSession(sessionKey) && newStatus === "paused")
+      root.suppressBreatherUntilPaused = false;
     // Breather link: launch once per break, on the first poll where the
     // break is running. A break that starts paused does not launch until
     // the user resumes it; pause/resume mid-break does not relaunch. The
@@ -494,7 +545,7 @@ Item {
     // session-ended edge; the Breather has its own rule.)
     if (sessionKey === "work") {
       root.breatherLaunchedFor = "";
-    } else if (!runEnded) {
+    } else if (!runEnded && !root.suppressBreatherUntilPaused) {
       var breakMinutes = Model.parseMinutes(state.text);
       if (Model.shouldLaunchBreather(sessionKey, newStatus, root.breatherLaunchedFor, root.breakPattern, breakMinutes)) {
         root.breatherLaunchedFor = sessionKey;
@@ -510,7 +561,7 @@ Item {
     root.remainingText = String(state.text || "");
     root.progress = Math.max(0, Math.min(1, (Number(state.percentage) || 0) / 100));
     root.tooltipText = String(state.tooltip || "");
-    root.sessionsToday = Number(state.sessions_today) || 0;
+    root.sessionsToday = sessionsTodayNow;
     root.focusedToday = String(state.focused_today || "");
     root.dailyGoal = String(state.daily_goal || "");
     root.currentStreak = Number(state.current_streak) || 0;
