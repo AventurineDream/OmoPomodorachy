@@ -6,7 +6,7 @@ const os = require("os");
 const { execFileSync } = require("child_process");
 const src = fs.readFileSync(path.join(__dirname, "..", "FocusdModel.js"), "utf8");
 const factory = new Function(
-  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, presetSection, updateDuration, listPresets, setActivePreset, validPresetName, savePresetAs, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, addTag, removeTag, enqueueTag, removeScheduledTag, filterSchedule, shiftSchedule, saveSchedulePreset, loadSchedulePreset, deleteSchedulePreset, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, setJsonKey, configTextOk, FOCUS_LOG_HEADER, FOCUS_LOG_CSV_HEADER, focusLogFormat, focusLogText, focusLogCsvText, focusLogCommand };"
+  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, presetSection, updateDuration, listPresets, setActivePreset, validPresetName, savePresetAs, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, addTag, removeTag, enqueueTag, removeScheduledTag, filterSchedule, shiftSchedule, saveSchedulePreset, loadSchedulePreset, deleteSchedulePreset, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, setJsonKey, configTextOk, FOCUS_LOG_HEADER, FOCUS_LOG_CSV_HEADER, focusLogFormat, focusLogText, focusLogCsvText, focusLogCommand, FOCUS_LOG_GUARD_SKIP_EXIT, focusLogSkipMessage };"
 );
 const M = factory();
 
@@ -333,9 +333,12 @@ check("focusLogCommand: an empty path is null", M.focusLogCommand("/x/write-conf
 // existing file is only replaced when it starts with the generated
 // header. The marker is name-independent ("This note is generated
 // from"), with the pre-rename string as a fallback, so an old-header
-// Focus Log is still recognised as generated.
-check("focusLogCommand: guard checks the existing file for the generated marker", FOCUS_CMD[2].indexOf('[ -e "$1" ]') !== -1 && FOCUS_CMD[2].indexOf("grep -qE") !== -1 && FOCUS_CMD[2].indexOf("This note is generated from") !== -1 && FOCUS_CMD[2].indexOf("Sessions logged by OmoPomodorachy") !== -1 && FOCUS_CMD[2].indexOf("exit 0") !== -1);
+// Focus Log is still recognised as generated. A skipped write exits
+// with FOCUS_LOG_GUARD_SKIP_EXIT (2), not 0, so the caller can tell a
+// skip from a successful write and log it (guard-log follow-up).
+check("focusLogCommand: guard checks the existing file for the generated marker", FOCUS_CMD[2].indexOf('[ -e "$1" ]') !== -1 && FOCUS_CMD[2].indexOf("grep -qE") !== -1 && FOCUS_CMD[2].indexOf("This note is generated from") !== -1 && FOCUS_CMD[2].indexOf("Sessions logged by OmoPomodorachy") !== -1 && FOCUS_CMD[2].indexOf("exit 2") !== -1);
 check("focusLogCommand: guard also accepts the format-specific CSV header row", FOCUS_CMD[2].indexOf("^Date,Tag,Minutes,Source") !== -1);
+check("focusLogSkipMessage: names the target path and the reason, no file contents", M.focusLogSkipMessage("/x/Focus Log.md").indexOf("/x/Focus Log.md") !== -1 && M.focusLogSkipMessage("/x/Focus Log.md").indexOf("not a generated Focus Log") !== -1);
 // Run the real argv against a stub write-config: a missing file is
 // written, a generated file is rewritten, a hand-written file is left
 // alone. The stub stands in for write-config --create (path, content).
@@ -346,21 +349,20 @@ fs.chmodSync(stubPath, 0o755);
 var guardTarget = path.join(guardDir, "Focus Log.md");
 function runFocusLog(content) {
   var argv = M.focusLogCommand(stubPath, guardTarget, content);
-  execFileSync(argv[0], argv.slice(1), { stdio: "ignore" });
+  // spawnSync (not execFileSync): a guard skip exits 2, which must not
+  // throw — the exit code is the signal the Service logs on.
+  var res = require("child_process").spawnSync(argv[0], argv.slice(1), { stdio: "ignore" });
+  return res.status;
 }
-runFocusLog(M.focusLogText(""));
-check("focusLogCommand guard: a missing file is written", fs.readFileSync(guardTarget, "utf8") === M.focusLogText(""));
-runFocusLog(M.focusLogText(SAMPLE_LOG_JSON));
-check("focusLogCommand guard: a generated file is rewritten", fs.readFileSync(guardTarget, "utf8") === M.focusLogText(SAMPLE_LOG_JSON));
+check("focusLogCommand guard: a missing file is written (exit 0)", runFocusLog(M.focusLogText("")) === 0 && fs.readFileSync(guardTarget, "utf8") === M.focusLogText(""));
+check("focusLogCommand guard: a generated file is rewritten (exit 0)", runFocusLog(M.focusLogText(SAMPLE_LOG_JSON)) === 0 && fs.readFileSync(guardTarget, "utf8") === M.focusLogText(SAMPLE_LOG_JSON));
 // An old-header file (pre-rename "OmoPomodorachy" marker) is still
 // recognised as generated and gets rewritten, not left behind.
 var OLD_HEADER = M.FOCUS_LOG_HEADER.replace("OmaPomodorchy", "OmoPomodorachy");
 fs.writeFileSync(guardTarget, OLD_HEADER + "\n");
-runFocusLog(M.focusLogText(SAMPLE_LOG_JSON));
-check("focusLogCommand guard: an old-header file is rewritten", fs.readFileSync(guardTarget, "utf8") === M.focusLogText(SAMPLE_LOG_JSON));
+check("focusLogCommand guard: an old-header file is rewritten (exit 0)", runFocusLog(M.focusLogText(SAMPLE_LOG_JSON)) === 0 && fs.readFileSync(guardTarget, "utf8") === M.focusLogText(SAMPLE_LOG_JSON));
 fs.writeFileSync(guardTarget, "# My own notes\n\nDo not overwrite.\n");
-runFocusLog(M.focusLogText(SAMPLE_LOG_JSON));
-check("focusLogCommand guard: a hand-written file is left alone", fs.readFileSync(guardTarget, "utf8") === "# My own notes\n\nDo not overwrite.\n");
+check("focusLogCommand guard: a hand-written file is left alone (exit 2)", runFocusLog(M.focusLogText(SAMPLE_LOG_JSON)) === M.FOCUS_LOG_GUARD_SKIP_EXIT && fs.readFileSync(guardTarget, "utf8") === "# My own notes\n\nDo not overwrite.\n");
 fs.rmSync(guardDir, { recursive: true, force: true });
 
 // CSV guard stub (Iolite review, PR #13): same argv, CSV target. A
@@ -373,15 +375,13 @@ fs.chmodSync(csvStubPath, 0o755);
 var csvGuardTarget = path.join(csvGuardDir, "focus-log.csv");
 function runFocusLogCsv(content) {
   var argv = M.focusLogCommand(csvStubPath, csvGuardTarget, content);
-  execFileSync(argv[0], argv.slice(1), { stdio: "ignore" });
+  var res = require("child_process").spawnSync(argv[0], argv.slice(1), { stdio: "ignore" });
+  return res.status;
 }
-runFocusLogCsv(M.focusLogCsvText(""));
-check("focusLogCommand CSV guard: a missing file is written", fs.readFileSync(csvGuardTarget, "utf8") === M.focusLogCsvText(""));
-runFocusLogCsv(M.focusLogCsvText(SAMPLE_LOG_JSON));
-check("focusLogCommand CSV guard: a generated CSV is rewritten", fs.readFileSync(csvGuardTarget, "utf8") === M.focusLogCsvText(SAMPLE_LOG_JSON));
+check("focusLogCommand CSV guard: a missing file is written (exit 0)", runFocusLogCsv(M.focusLogCsvText("")) === 0 && fs.readFileSync(csvGuardTarget, "utf8") === M.focusLogCsvText(""));
+check("focusLogCommand CSV guard: a generated CSV is rewritten (exit 0)", runFocusLogCsv(M.focusLogCsvText(SAMPLE_LOG_JSON)) === 0 && fs.readFileSync(csvGuardTarget, "utf8") === M.focusLogCsvText(SAMPLE_LOG_JSON));
 fs.writeFileSync(csvGuardTarget, "Date,Tag,Minutes\n2026-11-11,Work,25\n");
-runFocusLogCsv(M.focusLogCsvText(SAMPLE_LOG_JSON));
-check("focusLogCommand CSV guard: a hand-written CSV is left alone", fs.readFileSync(csvGuardTarget, "utf8") === "Date,Tag,Minutes\n2026-11-11,Work,25\n");
+check("focusLogCommand CSV guard: a hand-written CSV is left alone (exit 2)", runFocusLogCsv(M.focusLogCsvText(SAMPLE_LOG_JSON)) === M.FOCUS_LOG_GUARD_SKIP_EXIT && fs.readFileSync(csvGuardTarget, "utf8") === "Date,Tag,Minutes\n2026-11-11,Work,25\n");
 fs.rmSync(csvGuardDir, { recursive: true, force: true });
 
 // --- Presets: list, switch, save as ---
