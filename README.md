@@ -2,6 +2,8 @@
 
 A beautiful [Focusd](https://github.com/BibekBhusal0/focusd) pomodoro timer for the Omarchy bar. Shows the current session and remaining time with a state icon, and opens a control panel with pause, skip, and stop actions plus your streak, sessions, history, and daily goal.
 
+Pairs with [Terminal-Breather](https://github.com/AventurineDream/Terminal-Breather) — when a break starts, the Breather overlay opens with your break pattern. Install both with one command each (see Install below).
+
 ![Focusd preview](preview.png)
 
 ## Why Another Pomodoro Timer
