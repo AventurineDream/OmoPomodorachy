@@ -165,6 +165,7 @@ Please give a star if you find them useful!
 ## Panel (1.9.0)
 
 - **Durations collapses.** The Durations section has a chevron; collapse it to save space. The choice is remembered in `focusd.json` (`durationsExpanded`). The page also scrolls (Flickable), so the schedule area and View log are reachable with Durations expanded.
+- **Wheel scrolling (1.9.1).** The mouse wheel scrolls the page — an explicit WheelHandler moves the Flickable's content (touchpad pixel deltas when present, else 48px per wheel notch). Root cause unknown: nothing in TimerPage or Panel blocks the built-in wheel handler, so if the built-in handling ever starts working, remove the WheelHandler or the page will scroll twice per step. Drag scrolling works too.
 - **Preset menu.** The active preset is a dropdown (pomodoro first, then the rest in file order). Pick one to switch; the durations follow it from the next session of that type.
 - **Save as.** Save the current slider values as a new preset (name it, no spaces) — it is created in `config.toml` and made active.
 - **Rounds hint.** "Rounds: 0 is off." is on its own line so the Durations section fits cleanly.
