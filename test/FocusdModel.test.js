@@ -306,13 +306,23 @@ check("focusLogFormat: .CSV is csv (any case)", M.focusLogFormat("/home/aven/Foc
 check("focusLogFormat: .md is md", M.focusLogFormat("/home/aven/Focus Log.md") === "md");
 check("focusLogFormat: no extension is md", M.focusLogFormat("/home/aven/focus-log") === "md");
 check("focusLogFormat: empty path is md", M.focusLogFormat("") === "md");
-check("focusLogCsvText: header is the column row", M.focusLogCsvText("").split("\n")[0] === "Date,Tag,Minutes");
-check("focusLogCsvText: rows are one per block", M.focusLogCsvText(SAMPLE_LOG_JSON).indexOf("2026-11-11,Work,25") !== -1 && M.focusLogCsvText(SAMPLE_LOG_JSON).indexOf("2026-11-11,Art,15") !== -1);
+check("focusLogCsvText: header is the column row with Source", M.focusLogCsvText("").split("\n")[0] === "Date,Tag,Minutes,Source");
+check("focusLogCsvText: rows are one per block with Source", M.focusLogCsvText(SAMPLE_LOG_JSON).indexOf("2026-11-11,Work,25,OmaPomodorchy") !== -1 && M.focusLogCsvText(SAMPLE_LOG_JSON).indexOf("2026-11-11,Art,15,OmaPomodorchy") !== -1);
 check("focusLogCsvText: empty log is just the header", M.focusLogCsvText("").trim() === M.FOCUS_LOG_CSV_HEADER);
 check("focusLogCsvText: an invalid log is just the header", M.focusLogCsvText("{oops").trim() === M.FOCUS_LOG_CSV_HEADER);
 check("focusLogCsvText: a comma in a tag is quoted", M.focusLogCsvText('[{"date":"2026-11-11","tag":"A,B","minutes":25}]').indexOf('"A,B"') !== -1);
 check("focusLogCsvText: a quote in a tag is doubled and quoted", M.focusLogCsvText('[{"date":"2026-11-11","tag":"A\\"B","minutes":25}]').indexOf('"A""B"') !== -1);
-check("focusLogCsvText: a retag changes the csv row", M.focusLogCsvText(M.retagSessionLog(SAMPLE_LOG_JSON, "Study")).indexOf("2026-11-11,Study,15") !== -1 && M.focusLogCsvText(M.retagSessionLog(SAMPLE_LOG_JSON, "Study")).indexOf(",Art,") === -1);
+check("focusLogCsvText: a retag changes the csv row", M.focusLogCsvText(M.retagSessionLog(SAMPLE_LOG_JSON, "Study")).indexOf("2026-11-11,Study,15,OmaPomodorchy") !== -1 && M.focusLogCsvText(M.retagSessionLog(SAMPLE_LOG_JSON, "Study")).indexOf(",Art,") === -1);
+// Formula injection (Iolite review, PR #13): a tag starting with =, +,
+// -, @, tab, or CR is prefixed with a single quote so a spreadsheet
+// treats it as text instead of running it as a formula.
+check("focusLogCsvText: a tag starting with = is quote-prefixed", M.focusLogCsvText('[{"date":"2026-11-11","tag":"=2+2","minutes":25}]').indexOf("'=2+2") !== -1);
+check("focusLogCsvText: a tag starting with + is quote-prefixed", M.focusLogCsvText('[{"date":"2026-11-11","tag":"+2","minutes":25}]').indexOf("'+2") !== -1);
+check("focusLogCsvText: a tag starting with - is quote-prefixed", M.focusLogCsvText('[{"date":"2026-11-11","tag":"-2","minutes":25}]').indexOf("'-2") !== -1);
+check("focusLogCsvText: a tag starting with @ is quote-prefixed", M.focusLogCsvText('[{"date":"2026-11-11","tag":"@SUM(A1)","minutes":25}]').indexOf("'@SUM(A1)") !== -1);
+check("focusLogCsvText: a tag starting with a tab is quote-prefixed", M.focusLogCsvText('[{"date":"2026-11-11","tag":"\\tcmd","minutes":25}]').indexOf("'\tcmd") !== -1);
+check("focusLogCsvText: a tag starting with CR is quote-prefixed", M.focusLogCsvText('[{"date":"2026-11-11","tag":"\\rcmd","minutes":25}]').indexOf("'\rcmd") !== -1);
+check("focusLogCsvText: a plain tag is not prefixed", M.focusLogCsvText('[{"date":"2026-11-11","tag":"Work","minutes":25}]').indexOf("2026-11-11,Work,25,") !== -1);
 var FOCUS_CMD = M.focusLogCommand("/x/write-config", "/home/aven/Projects/Obsidian/Home/20_Practices/Focus/Focus Log.md", "TABLE");
 check("focusLogCommand: starts with sh -c", FOCUS_CMD[0] === "sh" && FOCUS_CMD[1] === "-c");
 check("focusLogCommand: mkdirs the parent dir then execs write-config --create", FOCUS_CMD[2].indexOf('mkdir -p "$(dirname "$1")"') !== -1 && FOCUS_CMD[2].indexOf('exec bash "$2" --create "$1" "$3"') !== -1);
@@ -325,7 +335,7 @@ check("focusLogCommand: an empty path is null", M.focusLogCommand("/x/write-conf
 // from"), with the pre-rename string as a fallback, so an old-header
 // Focus Log is still recognised as generated.
 check("focusLogCommand: guard checks the existing file for the generated marker", FOCUS_CMD[2].indexOf('[ -e "$1" ]') !== -1 && FOCUS_CMD[2].indexOf("grep -qE") !== -1 && FOCUS_CMD[2].indexOf("This note is generated from") !== -1 && FOCUS_CMD[2].indexOf("Sessions logged by OmoPomodorachy") !== -1 && FOCUS_CMD[2].indexOf("exit 0") !== -1);
-check("focusLogCommand: guard also accepts the CSV header row", FOCUS_CMD[2].indexOf("^Date,Tag,Minutes") !== -1);
+check("focusLogCommand: guard also accepts the format-specific CSV header row", FOCUS_CMD[2].indexOf("^Date,Tag,Minutes,Source") !== -1);
 // Run the real argv against a stub write-config: a missing file is
 // written, a generated file is rewritten, a hand-written file is left
 // alone. The stub stands in for write-config --create (path, content).
@@ -352,6 +362,27 @@ fs.writeFileSync(guardTarget, "# My own notes\n\nDo not overwrite.\n");
 runFocusLog(M.focusLogText(SAMPLE_LOG_JSON));
 check("focusLogCommand guard: a hand-written file is left alone", fs.readFileSync(guardTarget, "utf8") === "# My own notes\n\nDo not overwrite.\n");
 fs.rmSync(guardDir, { recursive: true, force: true });
+
+// CSV guard stub (Iolite review, PR #13): same argv, CSV target. A
+// generated CSV (with the Source marker column) is rewritten; a
+// hand-written CSV with a plain Date,Tag,Minutes header is left alone.
+var csvGuardDir = fs.mkdtempSync(path.join(os.tmpdir(), "focus-log-csv-guard-"));
+var csvStubPath = path.join(csvGuardDir, "write-config");
+fs.writeFileSync(csvStubPath, "#!/usr/bin/env bash\nif [ \"$1\" = \"--create\" ]; then shift; fi\nprintf '%s' \"$2\" > \"$1\"\n");
+fs.chmodSync(csvStubPath, 0o755);
+var csvGuardTarget = path.join(csvGuardDir, "focus-log.csv");
+function runFocusLogCsv(content) {
+  var argv = M.focusLogCommand(csvStubPath, csvGuardTarget, content);
+  execFileSync(argv[0], argv.slice(1), { stdio: "ignore" });
+}
+runFocusLogCsv(M.focusLogCsvText(""));
+check("focusLogCommand CSV guard: a missing file is written", fs.readFileSync(csvGuardTarget, "utf8") === M.focusLogCsvText(""));
+runFocusLogCsv(M.focusLogCsvText(SAMPLE_LOG_JSON));
+check("focusLogCommand CSV guard: a generated CSV is rewritten", fs.readFileSync(csvGuardTarget, "utf8") === M.focusLogCsvText(SAMPLE_LOG_JSON));
+fs.writeFileSync(csvGuardTarget, "Date,Tag,Minutes\n2026-11-11,Work,25\n");
+runFocusLogCsv(M.focusLogCsvText(SAMPLE_LOG_JSON));
+check("focusLogCommand CSV guard: a hand-written CSV is left alone", fs.readFileSync(csvGuardTarget, "utf8") === "Date,Tag,Minutes\n2026-11-11,Work,25\n");
+fs.rmSync(csvGuardDir, { recursive: true, force: true });
 
 // --- Presets: list, switch, save as ---
 var PRESET_TOML = 'active_preset = "pomodoro"\n\n[presets.pomodoro]\nwork_minutes = 25\nshort_break_minutes = 5\nlong_break_minutes = 15\nsessions_before_long_break = 4\n\n[presets.deep_work]\nwork_minutes = 50\nshort_break_minutes = 10\nlong_break_minutes = 30\nsessions_before_long_break = 4\n';
