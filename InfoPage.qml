@@ -21,7 +21,7 @@ Column {
 
   Text {
     width: parent.width
-    text: "OmoPomodorachy Info"
+    text: "OmaPomodorchy Info"
     color: root.foreground
     font.family: root.fontFamily
     font.pixelSize: Style.font.title

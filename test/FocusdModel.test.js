@@ -306,9 +306,12 @@ check("focusLogCommand: mkdirs the parent dir then execs write-config --create",
 check("focusLogCommand: path, script and table are positional args", FOCUS_CMD[4] === "/home/aven/Projects/Obsidian/Home/20_Practices/Focus/Focus Log.md" && FOCUS_CMD[5] === "/x/write-config" && FOCUS_CMD[6] === "TABLE");
 check("focusLogCommand: a relative path is null", M.focusLogCommand("/x/write-config", "Focus Log.md", "TABLE") === null);
 check("focusLogCommand: an empty path is null", M.focusLogCommand("/x/write-config", "", "TABLE") === null);
-// Overwrite guard (Iolite review, PR #7): an existing file is only
-// replaced when it starts with the generated header.
-check("focusLogCommand: guard checks the existing file for the generated marker", FOCUS_CMD[2].indexOf('[ -e "$1" ]') !== -1 && FOCUS_CMD[2].indexOf("Sessions logged by OmoPomodorachy") !== -1 && FOCUS_CMD[2].indexOf("exit 0") !== -1);
+// Overwrite guard (Iolite review, PR #7; rename fallback, PR #9): an
+// existing file is only replaced when it starts with the generated
+// header. The marker is name-independent ("This note is generated
+// from"), with the pre-rename string as a fallback, so an old-header
+// Focus Log is still recognised as generated.
+check("focusLogCommand: guard checks the existing file for the generated marker", FOCUS_CMD[2].indexOf('[ -e "$1" ]') !== -1 && FOCUS_CMD[2].indexOf("grep -qE") !== -1 && FOCUS_CMD[2].indexOf("This note is generated from") !== -1 && FOCUS_CMD[2].indexOf("Sessions logged by OmoPomodorachy") !== -1 && FOCUS_CMD[2].indexOf("exit 0") !== -1);
 // Run the real argv against a stub write-config: a missing file is
 // written, a generated file is rewritten, a hand-written file is left
 // alone. The stub stands in for write-config --create (path, content).
@@ -325,6 +328,12 @@ runFocusLog(M.focusLogText(""));
 check("focusLogCommand guard: a missing file is written", fs.readFileSync(guardTarget, "utf8") === M.focusLogText(""));
 runFocusLog(M.focusLogText(SAMPLE_LOG_JSON));
 check("focusLogCommand guard: a generated file is rewritten", fs.readFileSync(guardTarget, "utf8") === M.focusLogText(SAMPLE_LOG_JSON));
+// An old-header file (pre-rename "OmoPomodorachy" marker) is still
+// recognised as generated and gets rewritten, not left behind.
+var OLD_HEADER = M.FOCUS_LOG_HEADER.replace("OmaPomodorchy", "OmoPomodorachy");
+fs.writeFileSync(guardTarget, OLD_HEADER + "\n");
+runFocusLog(M.focusLogText(SAMPLE_LOG_JSON));
+check("focusLogCommand guard: an old-header file is rewritten", fs.readFileSync(guardTarget, "utf8") === M.focusLogText(SAMPLE_LOG_JSON));
 fs.writeFileSync(guardTarget, "# My own notes\n\nDo not overwrite.\n");
 runFocusLog(M.focusLogText(SAMPLE_LOG_JSON));
 check("focusLogCommand guard: a hand-written file is left alone", fs.readFileSync(guardTarget, "utf8") === "# My own notes\n\nDo not overwrite.\n");

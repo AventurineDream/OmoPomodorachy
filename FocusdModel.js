@@ -1,4 +1,4 @@
-// Pure helpers for OmoPomodorachy (fork of bibek.focusd). No QML, no I/O —
+// Pure helpers for OmaPomodorchy (fork of bibek.focusd). No QML, no I/O —
 // everything here is unit-tested by test/FocusdModel.test.js, and the
 // service (Service.qml) only calls these, never re-implements them.
 
@@ -401,7 +401,7 @@ function configTextOk(text) {
 // updates the vault row too, instead of leaving a stale row behind.
 // The note says it is generated, so nobody hand-edits rows that the
 // next block would overwrite.
-var FOCUS_LOG_HEADER = "# Focus Log\n\nSessions logged by OmoPomodorachy — one row per completed work block. This note is generated from ~/.config/omarchy/focusd-sessions.json; change a block's tag in the panel's Last row, not by editing this table.\n\n| Date | Tag | Minutes |\n| --- | --- | --- |"
+var FOCUS_LOG_HEADER = "# Focus Log\n\nSessions logged by OmaPomodorchy — one row per completed work block. This note is generated from ~/.config/omarchy/focusd-sessions.json; change a block's tag in the panel's Last row, not by editing this table.\n\n| Date | Tag | Minutes |\n| --- | --- | --- |"
 
 // Build the full Focus Log note text from the sessions log text. Tags
 // are scrubbed of pipes and newlines so a tag can never break the
@@ -424,13 +424,17 @@ function focusLogText(text) {
 // a table with quotes is data, never syntax. Returns null when the log
 // path is not an absolute path (an empty path disables the sync).
 // Overwrite guard: an existing file is only replaced when it starts
-// with the generated header (the "Sessions logged by OmoPomodorachy"
-// marker in its first three lines) — a hand-written note at that path
-// is left alone, and the write is skipped silently.
+// with the generated header — a hand-written note at that path is left
+// alone, and the write is skipped silently. The marker is
+// name-independent ("This note is generated from", present in every
+// generated header), with the pre-rename string ("Sessions logged by
+// OmoPomodorachy") as a fallback, so a Focus Log written before the
+// rename is still recognised as generated and gets rewritten rather
+// than silently never updating.
 function focusLogCommand(writeScriptPath, focusLogPath, tableText) {
   var path = String(focusLogPath || "")
   if (!path || path.charAt(0) !== "/") return null
   return ["sh", "-c",
-    'mkdir -p "$(dirname "$1")" && if [ -e "$1" ] && ! head -n 3 "$1" | grep -q "Sessions logged by OmoPomodorachy"; then exit 0; fi && exec bash "$2" --create "$1" "$3"',
+    'mkdir -p "$(dirname "$1")" && if [ -e "$1" ] && ! head -n 3 "$1" | grep -qE "This note is generated from|Sessions logged by OmoPomodorachy"; then exit 0; fi && exec bash "$2" --create "$1" "$3"',
     "sh", path, String(writeScriptPath || ""), String(tableText || "")]
 }
