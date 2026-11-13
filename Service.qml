@@ -222,17 +222,22 @@ Item {
       root.focusLogPath = String(fl);
   }
 
-  // Rewrite the vault Focus Log from the in-memory sessions log. The
-  // whole table is regenerated each time (never appended), so a retag
-  // updates the vault row. Nothing is written while the log is unloaded
-  // or the sync is off — a vault write must never come from a stale view —
-  // and an existing note is only replaced when it starts with the
-  // generated header, so a hand-written note at that path is left alone.
+  // Rewrite the Focus Log export from the in-memory sessions log. The
+  // whole export is regenerated each time (never appended), so a retag
+  // updates the row. Nothing is written while the log is unloaded or
+  // the sync is off — an export must never come from a stale view — and
+  // an existing file is only replaced when it starts with the generated
+  // header, so a hand-written file at that path is left alone. The
+  // format follows the path's extension: .csv writes CSV, anything else
+  // writes the Markdown table. The path may point anywhere, not only
+  // the vault.
   function writeFocusLog() {
     if (!root.focusLogPath || !root.sessionsLoadedOk)
       return;
-    var table = Model.focusLogText(root.sessionsRaw);
-    var cmd = Model.focusLogCommand(root.writeScriptPath, root.focusLogPath, table);
+    var text = Model.focusLogFormat(root.focusLogPath) === "csv"
+      ? Model.focusLogCsvText(root.sessionsRaw)
+      : Model.focusLogText(root.sessionsRaw);
+    var cmd = Model.focusLogCommand(root.writeScriptPath, root.focusLogPath, text);
     if (cmd)
       Quickshell.execDetached(cmd);
   }
