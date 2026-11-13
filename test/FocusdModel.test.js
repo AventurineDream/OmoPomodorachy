@@ -6,7 +6,7 @@ const os = require("os");
 const { execFileSync } = require("child_process");
 const src = fs.readFileSync(path.join(__dirname, "..", "FocusdModel.js"), "utf8");
 const factory = new Function(
-  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, presetSection, updateDuration, listPresets, setActivePreset, validPresetName, savePresetAs, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, addTag, removeTag, enqueueTag, removeScheduledTag, shiftSchedule, saveSchedulePreset, loadSchedulePreset, deleteSchedulePreset, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, setJsonKey, configTextOk, FOCUS_LOG_HEADER, focusLogText, focusLogCommand };"
+  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, presetSection, updateDuration, listPresets, setActivePreset, validPresetName, savePresetAs, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, addTag, removeTag, enqueueTag, removeScheduledTag, filterSchedule, shiftSchedule, saveSchedulePreset, loadSchedulePreset, deleteSchedulePreset, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, setJsonKey, configTextOk, FOCUS_LOG_HEADER, focusLogText, focusLogCommand };"
 );
 const M = factory();
 
@@ -367,6 +367,11 @@ check("removeScheduledTag: a bad index is null", M.removeScheduledTag(["Work"], 
 var shifted = M.shiftSchedule(["Work", "Study"]);
 check("shiftSchedule: takes the front tag", shifted !== null && shifted.tag === "Work" && JSON.stringify(shifted.schedule) === JSON.stringify(["Study"]));
 check("shiftSchedule: an empty queue is null", M.shiftSchedule([]) === null);
+var shiftedSkip = M.shiftSchedule(["Gone", "Work", "Study"], ["Work", "Study", "Art"]);
+check("shiftSchedule: skips a deleted tag at the front", shiftedSkip !== null && shiftedSkip.tag === "Work" && JSON.stringify(shiftedSkip.schedule) === JSON.stringify(["Study"]));
+check("shiftSchedule: all-unknown queue is null", M.shiftSchedule(["Gone", "AlsoGone"], ["Work", "Study"]) === null);
+check("filterSchedule: drops deleted tags, keeps the rest", JSON.stringify(M.filterSchedule(["Work", "Gone", "Study"], ["Work", "Study", "Art"])) === JSON.stringify(["Work", "Study"]));
+check("filterSchedule: an empty or all-unknown queue is empty", JSON.stringify(M.filterSchedule(["Gone"], ["Work"])) === JSON.stringify([]) && JSON.stringify(M.filterSchedule([], ["Work"])) === JSON.stringify([]));
 var schedPresets = M.saveSchedulePreset({}, "Morning", ["Work", "Study", "Art"]);
 check("saveSchedulePreset: saves under the name", schedPresets !== null && JSON.stringify(schedPresets.Morning) === JSON.stringify(["Work", "Study", "Art"]));
 check("saveSchedulePreset: a duplicate name or empty queue is null", M.saveSchedulePreset(schedPresets, "Morning", ["Work"]) === null && M.saveSchedulePreset({}, "Empty", []) === null);
