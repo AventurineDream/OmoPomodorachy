@@ -197,6 +197,196 @@ function updateDuration(tomlText, kind, value) {
   return text.slice(0, section.start) + body + text.slice(section.end)
 }
 
+// ---- Presets: list, switch, save as ----
+// The preset names in the TOML, in file order (pomodoro first — it is
+// the first [presets.*] section in the stock config). Empty when the
+// file has no preset sections.
+function listPresets(tomlText) {
+  var text = String(tomlText || "")
+  var out = []
+  var re = /^\[presets\.([A-Za-z0-9_-]+)\][ \t]*$/gm
+  var m
+  while ((m = re.exec(text)) !== null) {
+    if (out.indexOf(m[1]) === -1) out.push(m[1])
+  }
+  return out
+}
+
+// Switch the active preset. Returns the updated TOML, or null when the
+// name is not one of the file's presets. The durations come from the
+// TOML on the next poll; nothing else is touched.
+function setActivePreset(tomlText, name) {
+  var text = String(tomlText || "")
+  var presets = listPresets(text)
+  if (presets.indexOf(String(name)) === -1) return null
+  var re = /^([ \t]*active_preset[ \t]*=[ \t]*)"[^"\n]*"/m
+  if (!re.test(text)) return null
+  return text.replace(re, function (m, p1) { return p1 + '"' + String(name) + '"' })
+}
+
+// A preset name is a bare TOML key: letters, digits, underscore and
+// hyphen, starting with a letter or underscore, no spaces. Null when
+// the name is not usable as a [presets.<name>] section.
+function validPresetName(name) {
+  var n = String(name || "").trim()
+  return /^[A-Za-z_][A-Za-z0-9_-]*$/.test(n) ? n : null
+}
+
+// Save the given durations as a preset (new or existing) and make it
+// active. sessions_before_long_break is inherited from the active
+// preset (4 when it has none). Returns the updated TOML, or null on a
+// bad name or an unparseable file.
+function savePresetAs(tomlText, name, work, shortBreak, longBreak) {
+  var text = String(tomlText || "")
+  var valid = validPresetName(name)
+  if (!valid) return null
+  var parsed = parseDurations(text)
+  if (!parsed) return null
+  var w = clampDuration("work", work)
+  var s = clampDuration("shortBreak", shortBreak)
+  var l = clampDuration("longBreak", longBreak)
+  if (w === null || s === null || l === null) return null
+  // sessions_before_long_break rides along from the active preset.
+  var activeBody = ""
+  var activeSection = presetSection(text, parsed.preset)
+  if (activeSection) activeBody = text.slice(activeSection.start, activeSection.end)
+  var sbl = activeBody.match(/^[ \t]*sessions_before_long_break[ \t]*=[ \t]*([0-9]+)/m)
+  var sessions = sbl ? Number(sbl[1]) : 4
+  var sectionText = "[presets." + valid + "]\nwork_minutes = " + w + "\nshort_break_minutes = " + s + "\nlong_break_minutes = " + l + "\nsessions_before_long_break = " + sessions + "\n"
+  var section = presetSection(text, valid)
+  if (section) {
+    // Replace the existing section's body, keeping any surrounding
+    // comments and the sessions_before_long_break line if present.
+    var body = text.slice(section.start, section.end)
+    function setKey(b, key, value) {
+      var re = new RegExp("^(\\s*" + key + "\\s*=\\s*)[0-9]+", "m")
+      if (re.test(b)) return b.replace(re, function (m, p1) { return p1 + value })
+      return b.replace(/\s*$/, "\n" + key + " = " + value + "\n")
+    }
+    body = setKey(body, "work_minutes", w)
+    body = setKey(body, "short_break_minutes", s)
+    body = setKey(body, "long_break_minutes", l)
+    if (!/sessions_before_long_break/.test(body))
+      body = body.replace(/\s*$/, "\nsessions_before_long_break = " + sessions + "\n")
+    text = text.slice(0, section.start) + body + text.slice(section.end)
+  } else {
+    if (text.length && text.charAt(text.length - 1) !== "\n") text += "\n"
+    text += "\n" + sectionText
+  }
+  return setActivePreset(text, valid)
+}
+
+// ---- Tags: add and remove ----
+// Add a tag to the category list. The name is trimmed; an empty name, a
+// duplicate, or a name with a pipe or newline is rejected (a pipe would
+// break the Focus Log table). Returns the new list, or null.
+function addTag(tags, name) {
+  var list = parseTags(tags)
+  var n = String(name || "").trim()
+  if (!n || n.indexOf("|") !== -1 || n.indexOf("\n") !== -1 || n.indexOf("\r") !== -1) return null
+  if (list.indexOf(n) !== -1) return null
+  return list.concat([n])
+}
+
+// Remove a tag from the category list. Returns the new list, or null
+// when the tag is not there or removing it would leave no tags at all.
+function removeTag(tags, name) {
+  var list = parseTags(tags)
+  var idx = list.indexOf(String(name))
+  if (idx === -1) return null
+  if (list.length <= 1) return null
+  list.splice(idx, 1)
+  return list
+}
+
+// ---- Tag schedule: queue tags for upcoming blocks, save as presets ----
+// A schedule is an ordered queue of tags for upcoming work blocks. When
+// a block ends, the next tag is taken from the front of the queue and
+// becomes the current tag for the block after it. The queue lives in
+// focusd.json under `tagSchedule`; named presets live under
+// `tagSchedulePresets` (name -> tag array).
+
+// Append a tag to the schedule queue. The tag must be one of the known
+// categories. Returns the new queue, or null.
+function enqueueTag(schedule, tag, tags) {
+  var known = parseTags(tags)
+  var t = String(tag || "").trim()
+  if (known.indexOf(t) === -1) return null
+  var q = Array.isArray(schedule) ? schedule.slice() : []
+  q.push(t)
+  return q
+}
+
+// Remove the queued tag at index. Returns the new queue, or null.
+function removeScheduledTag(schedule, index) {
+  var q = Array.isArray(schedule) ? schedule.slice() : []
+  var i = Number(index)
+  if (!isFinite(i) || i < 0 || i >= q.length) return null
+  q.splice(i, 1)
+  return q
+}
+
+// Drop queued tags that are no longer among the known categories
+// (e.g. a category deleted after it was queued). Returns the filtered
+// queue.
+function filterSchedule(schedule, tags) {
+  var known = parseTags(tags)
+  var q = Array.isArray(schedule) ? schedule.slice() : []
+  return q.filter(function (t) { return known.indexOf(t) !== -1 })
+}
+
+// Take the next scheduled tag off the front of the queue. Tags that are
+// no longer among the known categories are skipped and dropped, so a
+// deleted category can never jam the queue at block end. Returns
+// { tag, schedule } or null when the queue is empty or holds only
+// unknown tags. The `tags` list is optional: without it, the front tag
+// is taken as-is (the pre-existing behaviour).
+function shiftSchedule(schedule, tags) {
+  var q = Array.isArray(schedule) ? schedule.slice() : []
+  var known = tags ? parseTags(tags) : null
+  while (q.length) {
+    var t = q.shift()
+    if (!known || known.indexOf(t) !== -1)
+      return { tag: t, schedule: q }
+  }
+  return null
+}
+
+// Save a schedule queue as a named preset. The name is trimmed; an
+// empty name, an empty queue, or a duplicate name is rejected —
+// overwriting a saved preset is done by deleting it first. Returns the
+// new presets object, or null.
+function saveSchedulePreset(presets, name, schedule) {
+  var n = String(name || "").trim()
+  var q = Array.isArray(schedule) ? schedule.slice() : []
+  if (!n || !q.length) return null
+  var p = (presets && typeof presets === "object" && !Array.isArray(presets)) ? presets : {}
+  if (p[n] !== undefined) return null
+  var out = {}
+  for (var k in p) out[k] = p[k]
+  out[n] = q
+  return out
+}
+
+// Load a saved schedule preset: its tag array, or null when the name
+// is not one of the saved presets.
+function loadSchedulePreset(presets, name) {
+  var p = (presets && typeof presets === "object" && !Array.isArray(presets)) ? presets : {}
+  var q = p[String(name)]
+  return Array.isArray(q) && q.length ? q.slice() : null
+}
+
+// Delete a saved schedule preset. Returns the new presets object, or
+// null when the name is not one of the saved presets.
+function deleteSchedulePreset(presets, name) {
+  var p = (presets && typeof presets === "object" && !Array.isArray(presets)) ? presets : {}
+  if (p[String(name)] === undefined) return null
+  var out = {}
+  for (var k in p) if (k !== String(name)) out[k] = p[k]
+  return out
+}
+
+
 // ---- Rounds before stop (Phase 4) ----
 // A run is a sequence of work sessions. `rounds` (0 = off, unlimited) is
 // how many work sessions run before the timer stops. The count is
