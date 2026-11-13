@@ -230,16 +230,27 @@ Item {
   // header, so a hand-written file at that path is left alone. The
   // format follows the path's extension: .csv writes CSV, anything else
   // writes the Markdown table. The path may point anywhere, not only
-  // the vault.
+  // the vault. The write runs through focusLogWriteProc (not
+  // execDetached) so the exit code is visible: 0 is a successful write,
+  // FOCUS_LOG_GUARD_SKIP_EXIT (2) is the overwrite guard skipping a
+  // hand-written file, and anything else is a failed write. A skip logs
+  // a console.warn with the target path and the reason — no file
+  // contents, no new log file.
+  property string focusLogWritePath: ""
   function writeFocusLog() {
     if (!root.focusLogPath || !root.sessionsLoadedOk)
+      return;
+    if (focusLogWriteProc.running)
       return;
     var text = Model.focusLogFormat(root.focusLogPath) === "csv"
       ? Model.focusLogCsvText(root.sessionsRaw)
       : Model.focusLogText(root.sessionsRaw);
     var cmd = Model.focusLogCommand(root.writeScriptPath, root.focusLogPath, text);
-    if (cmd)
-      Quickshell.execDetached(cmd);
+    if (!cmd)
+      return;
+    root.focusLogWritePath = root.focusLogPath;
+    focusLogWriteProc.command = cmd;
+    focusLogWriteProc.running = true;
   }
   property var fileConfig: ({})
   function parseFileConfig(raw) {
@@ -1086,6 +1097,26 @@ Item {
     repeat: true
     running: true
     onTriggered: root.poll()
+  }
+
+  Process {
+    id: focusLogWriteProc
+    // Runs the focusLogCommand argv (mkdir + guard + write-config). The
+    // exit code is the only signal back: 0 wrote the file, 2 is the
+    // overwrite guard skipping a hand-written file, anything else is a
+    // failed write. A skip logs a console.warn with the target path and
+    // the reason (Model.focusLogSkipMessage) — no file contents.
+    onExited: function (exitCode) {
+      var path = root.focusLogWritePath;
+      root.focusLogWritePath = "";
+      if (exitCode === 0)
+        return;
+      if (exitCode === Model.FOCUS_LOG_GUARD_SKIP_EXIT) {
+        console.warn(Model.focusLogSkipMessage(path));
+        return;
+      }
+      console.warn("Focusd: Focus Log write failed for " + path + " (exit " + exitCode + ")");
+    }
   }
 
   Process {
