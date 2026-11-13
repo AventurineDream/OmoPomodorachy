@@ -46,16 +46,26 @@ Item {
     contentHeight: contentColumn.implicitHeight
 
     // Wheel events were not reaching the Flickable's built-in handler on
-    // this surface (drag scrolled, the wheel did not), so scroll
-    // explicitly: a wheel step moves the content, clamped to the
-    // scrollable range. A wheel step down (negative angleDelta.y) moves
-    // the content up, revealing the schedule area and View log below
-    // the fold.
+    // this surface (drag scrolled, the wheel did not). Root cause is
+    // UNKNOWN — nothing in TimerPage or Panel blocks the built-in wheel
+    // (the PanelKeyCatcher is keyboard-only). This explicit handler is
+    // a workaround: if the built-in wheel handling ever starts working,
+    // REMOVE this WheelHandler, or the page will scroll twice per wheel
+    // step (double scroll).
+    // Touchpads report smooth pixel deltas; a mouse wheel reports angle
+    // deltas in 120ths of a degree per notch. 48px per notch is a
+    // comfortable step (120px/notch is a lot). The event is only
+    // accepted when the content actually moves, so a wheel step at the
+    // top or bottom still propagates.
     WheelHandler {
       onWheel: function (event) {
-        var maxY = Math.max(0, scroller.contentHeight - scroller.height);
-        scroller.contentY = Math.max(0, Math.min(scroller.contentY - event.angleDelta.y, maxY));
-        event.accepted = true;
+        var step = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y / 120 * 48;
+        var maxY = scroller.originY + Math.max(0, scroller.contentHeight - scroller.height);
+        var next = Math.max(scroller.originY, Math.min(scroller.contentY - step, maxY));
+        if (next !== scroller.contentY) {
+          scroller.contentY = next;
+          event.accepted = true;
+        }
       }
     }
 
