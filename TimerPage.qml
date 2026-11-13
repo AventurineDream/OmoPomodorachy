@@ -25,6 +25,12 @@ Item {
   property string schedulePresetName: ""
   property bool hasSessionData: false
   property int totalActionCount: 2
+  // True while any inline editor has keyboard focus. The panel binds the
+  // key catcher's `blocked` flag to this, so Enter/typing in a text field
+  // does not also fire the panel's activate action (which toggles the
+  // timer). Without it, Enter in the New tag field both added the tag
+  // AND started the timer.
+  readonly property bool editorActive: presetNameField.activeFocus || newTagField.activeFocus || scheduleNameField.activeFocus
 
   signal updateRequested
   signal infoRequested
