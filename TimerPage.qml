@@ -31,7 +31,19 @@ Item {
   signal actionHovered(int index, bool hovered)
 
   width: parent.width
-  height: contentColumn.implicitHeight
+  // The page is taller than the screen when Durations is expanded, so
+  // cap the page height and let the content scroll instead of clipping
+  // below the fold. Screen.height is the display the panel is on; the
+  // bar, gaps and panel insets take roughly 100px.
+  readonly property real maxContentHeight: Math.max(200, Screen.height - 100)
+  height: Math.min(contentColumn.implicitHeight, maxContentHeight)
+
+  Flickable {
+    id: scroller
+    anchors.fill: parent
+    clip: true
+    contentWidth: width
+    contentHeight: contentColumn.implicitHeight
 
   Column {
     id: contentColumn
@@ -566,6 +578,19 @@ Item {
         }
       }
 
+      // Shown when a tag or schedule write was refused (the config
+      // read failed, so the write was held back rather than risking the
+      // file). It clears on the next successful write.
+      Text {
+        visible: root.timerService ? root.timerService.tagWriteRefused : false
+        width: parent.width
+        text: "Couldn't save tags just now — the config isn't ready. Try again in a moment."
+        color: Color.urgent
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        wrapMode: Text.WordWrap
+      }
+
       Row {
         visible: root.timerService ? !!root.timerService.lastWorkSession : false
         width: parent.width
@@ -1054,5 +1079,6 @@ Item {
         }
       }
     }
+  }
   }
 }
