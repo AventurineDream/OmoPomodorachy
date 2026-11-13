@@ -308,7 +308,7 @@ check("focusLogCommand: a relative path is null", M.focusLogCommand("/x/write-co
 check("focusLogCommand: an empty path is null", M.focusLogCommand("/x/write-config", "", "TABLE") === null);
 // Overwrite guard (Iolite review, PR #7): an existing file is only
 // replaced when it starts with the generated header.
-check("focusLogCommand: guard checks the existing file for the generated marker", FOCUS_CMD[2].indexOf('[ -e "$1" ]') !== -1 && FOCUS_CMD[2].indexOf("Sessions logged by OmoPomodorachy") !== -1 && FOCUS_CMD[2].indexOf("exit 0") !== -1);
+check("focusLogCommand: guard checks the existing file for the generated marker", FOCUS_CMD[2].indexOf('[ -e "$1" ]') !== -1 && FOCUS_CMD[2].indexOf("Sessions logged by OmaPomodorchy") !== -1 && FOCUS_CMD[2].indexOf("exit 0") !== -1);
 // Run the real argv against a stub write-config: a missing file is
 // written, a generated file is rewritten, a hand-written file is left
 // alone. The stub stands in for write-config --create (path, content).
