@@ -424,13 +424,17 @@ function focusLogText(text) {
 // a table with quotes is data, never syntax. Returns null when the log
 // path is not an absolute path (an empty path disables the sync).
 // Overwrite guard: an existing file is only replaced when it starts
-// with the generated header (the "Sessions logged by OmaPomodorchy"
-// marker in its first three lines) — a hand-written note at that path
-// is left alone, and the write is skipped silently.
+// with the generated header — a hand-written note at that path is left
+// alone, and the write is skipped silently. The marker is
+// name-independent ("This note is generated from", present in every
+// generated header), with the pre-rename string ("Sessions logged by
+// OmoPomodorachy") as a fallback, so a Focus Log written before the
+// rename is still recognised as generated and gets rewritten rather
+// than silently never updating.
 function focusLogCommand(writeScriptPath, focusLogPath, tableText) {
   var path = String(focusLogPath || "")
   if (!path || path.charAt(0) !== "/") return null
   return ["sh", "-c",
-    'mkdir -p "$(dirname "$1")" && if [ -e "$1" ] && ! head -n 3 "$1" | grep -q "Sessions logged by OmaPomodorchy"; then exit 0; fi && exec bash "$2" --create "$1" "$3"',
+    'mkdir -p "$(dirname "$1")" && if [ -e "$1" ] && ! head -n 3 "$1" | grep -qE "This note is generated from|Sessions logged by OmoPomodorachy"; then exit 0; fi && exec bash "$2" --create "$1" "$3"',
     "sh", path, String(writeScriptPath || ""), String(tableText || "")]
 }
