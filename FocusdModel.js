@@ -661,7 +661,7 @@ function focusLogText(text) {
 // disables the sync).
 // Overwrite guard: an existing file is only replaced when it starts with
 // the generated header — a hand-written file at that path is left alone,
-// and the write is skipped silently. For Markdown the marker is
+// and the write is skipped. For Markdown the marker is
 // name-independent ("This note is generated from", present in every
 // generated header), with the pre-rename string ("Sessions logged by
 // OmoPomodorachy") as a fallback, so a Focus Log written before the
@@ -669,10 +669,18 @@ function focusLogText(text) {
 // than silently never updating. For CSV the marker is the format-specific
 // header row ("Date,Tag,Minutes,Source") — a plain Date,Tag,Minutes CSV
 // a user wrote by hand does not match, so it is left alone.
+// A skipped write exits with FOCUS_LOG_GUARD_SKIP_EXIT (2), not 0, so
+// the caller can tell a skip from a successful write and log it —
+// console.warn, with the target path and the reason, no file contents.
+var FOCUS_LOG_GUARD_SKIP_EXIT = 2
+function focusLogSkipMessage(focusLogPath) {
+  return "Focus Log write skipped: " + String(focusLogPath || "") +
+    " already exists and is not a generated Focus Log (no generated header), leaving it alone"
+}
 function focusLogCommand(writeScriptPath, focusLogPath, tableText) {
   var path = String(focusLogPath || "")
   if (!path || path.charAt(0) !== "/") return null
   return ["sh", "-c",
-    'mkdir -p "$(dirname "$1")" && if [ -e "$1" ] && ! head -n 3 "$1" | grep -qE "This note is generated from|Sessions logged by OmoPomodorachy|^Date,Tag,Minutes,Source"; then exit 0; fi && exec bash "$2" --create "$1" "$3"',
+    'mkdir -p "$(dirname "$1")" && if [ -e "$1" ] && ! head -n 3 "$1" | grep -qE "This note is generated from|Sessions logged by OmoPomodorachy|^Date,Tag,Minutes,Source"; then exit 2; fi && exec bash "$2" --create "$1" "$3"',
     "sh", path, String(writeScriptPath || ""), String(tableText || "")]
 }
