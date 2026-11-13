@@ -6,7 +6,7 @@ const os = require("os");
 const { execFileSync } = require("child_process");
 const src = fs.readFileSync(path.join(__dirname, "..", "FocusdModel.js"), "utf8");
 const factory = new Function(
-  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, updateDuration, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, setJsonKey, configTextOk, FOCUS_LOG_HEADER, focusLogText, focusLogCommand };"
+  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, presetSection, updateDuration, listPresets, setActivePreset, validPresetName, savePresetAs, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, addTag, removeTag, enqueueTag, removeScheduledTag, shiftSchedule, saveSchedulePreset, loadSchedulePreset, deleteSchedulePreset, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, setJsonKey, configTextOk, FOCUS_LOG_HEADER, focusLogText, focusLogCommand };"
 );
 const M = factory();
 
@@ -338,5 +338,41 @@ fs.writeFileSync(guardTarget, "# My own notes\n\nDo not overwrite.\n");
 runFocusLog(M.focusLogText(SAMPLE_LOG_JSON));
 check("focusLogCommand guard: a hand-written file is left alone", fs.readFileSync(guardTarget, "utf8") === "# My own notes\n\nDo not overwrite.\n");
 fs.rmSync(guardDir, { recursive: true, force: true });
+
+// --- Presets: list, switch, save as ---
+var PRESET_TOML = 'active_preset = "pomodoro"\n\n[presets.pomodoro]\nwork_minutes = 25\nshort_break_minutes = 5\nlong_break_minutes = 15\nsessions_before_long_break = 4\n\n[presets.deep_work]\nwork_minutes = 50\nshort_break_minutes = 10\nlong_break_minutes = 30\nsessions_before_long_break = 4\n';
+check("listPresets: pomodoro first, in file order", JSON.stringify(M.listPresets(PRESET_TOML)) === JSON.stringify(["pomodoro", "deep_work"]));
+check("listPresets: no sections is empty", M.listPresets('active_preset = "pomodoro"\n').length === 0);
+check("setActivePreset: switches to deep_work", M.setActivePreset(PRESET_TOML, "deep_work").indexOf('active_preset = "deep_work"') !== -1);
+check("setActivePreset: unknown name is null", M.setActivePreset(PRESET_TOML, "nope") === null);
+check("validPresetName: good names pass, spaces fail", M.validPresetName("study") === "study" && M.validPresetName("my preset") === null && M.validPresetName("") === null);
+var saved = M.savePresetAs(PRESET_TOML, "study", 45, 10, 20);
+check("savePresetAs: creates the section and makes it active", saved !== null && saved.indexOf("[presets.study]") !== -1 && saved.indexOf("work_minutes = 45") !== -1 && saved.indexOf('active_preset = "study"') !== -1 && M.listPresets(saved).indexOf("study") !== -1);
+var savedOver = M.savePresetAs(PRESET_TOML, "pomodoro", 30, 5, 15);
+check("savePresetAs: overwriting an existing preset updates it in place", savedOver !== null && M.parseDurations(savedOver).work === 30 && M.listPresets(savedOver).length === 2);
+check("savePresetAs: a bad name is null", M.savePresetAs(PRESET_TOML, "my preset", 45, 10, 20) === null);
+
+// --- Tags: add and remove ---
+check("addTag: adds a new tag", JSON.stringify(M.addTag(["Work", "Study"], "Art")) === JSON.stringify(["Work", "Study", "Art"]));
+check("addTag: a duplicate or empty name is null", M.addTag(["Work"], "Work") === null && M.addTag(["Work"], "  ") === null);
+check("addTag: a pipe in a name is null", M.addTag(["Work"], "A|B") === null);
+check("removeTag: removes the tag", JSON.stringify(M.removeTag(["Work", "Study", "Art"], "Study")) === JSON.stringify(["Work", "Art"]));
+check("removeTag: unknown tag or the last tag is null", M.removeTag(["Work"], "Study") === null && M.removeTag(["Work"], "Work") === null);
+
+// --- Tag schedule: queue, presets ---
+check("enqueueTag: appends a known tag", JSON.stringify(M.enqueueTag(["Work"], "Study", ["Work", "Study"])) === JSON.stringify(["Work", "Study"]));
+check("enqueueTag: an unknown tag is null", M.enqueueTag([], "Nope", ["Work"]) === null);
+check("removeScheduledTag: removes by index", JSON.stringify(M.removeScheduledTag(["Work", "Study", "Art"], 1)) === JSON.stringify(["Work", "Art"]));
+check("removeScheduledTag: a bad index is null", M.removeScheduledTag(["Work"], 5) === null);
+var shifted = M.shiftSchedule(["Work", "Study"]);
+check("shiftSchedule: takes the front tag", shifted !== null && shifted.tag === "Work" && JSON.stringify(shifted.schedule) === JSON.stringify(["Study"]));
+check("shiftSchedule: an empty queue is null", M.shiftSchedule([]) === null);
+var schedPresets = M.saveSchedulePreset({}, "Morning", ["Work", "Study", "Art"]);
+check("saveSchedulePreset: saves under the name", schedPresets !== null && JSON.stringify(schedPresets.Morning) === JSON.stringify(["Work", "Study", "Art"]));
+check("saveSchedulePreset: a duplicate name or empty queue is null", M.saveSchedulePreset(schedPresets, "Morning", ["Work"]) === null && M.saveSchedulePreset({}, "Empty", []) === null);
+check("loadSchedulePreset: returns the saved queue", JSON.stringify(M.loadSchedulePreset(schedPresets, "Morning")) === JSON.stringify(["Work", "Study", "Art"]));
+check("loadSchedulePreset: an unknown name is null", M.loadSchedulePreset(schedPresets, "Nope") === null);
+check("deleteSchedulePreset: removes the preset", JSON.stringify(M.deleteSchedulePreset(schedPresets, "Morning")) === JSON.stringify({}));
+check("deleteSchedulePreset: an unknown name is null", M.deleteSchedulePreset(schedPresets, "Nope") === null);
 
 console.log(`FocusdModel tests: ${pass} passed${process.exitCode ? " (WITH FAILURES)" : ""}`);

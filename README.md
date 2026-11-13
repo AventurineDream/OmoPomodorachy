@@ -161,3 +161,13 @@ Here are my other Omarchy plugins:
 - [Better Menu](https://github.com/BibekBhusal0/omarchy-better-menu) - fuzzy menu with app grid, calculator and web search
 
 Please give a star if you find them useful!
+
+## Panel (1.9.0)
+
+- **Durations collapses.** The Durations section has a chevron; collapse it to save space. The choice is remembered in `focusd.json` (`durationsExpanded`).
+- **Preset menu.** The active preset is a dropdown (pomodoro first, then the rest in file order). Pick one to switch; the durations follow it from the next session of that type.
+- **Save as.** Save the current slider values as a new preset (name it, no spaces) — it is created in `config.toml` and made active.
+- **Rounds hint.** "Rounds: 0 is off." is on its own line so the Durations section fits cleanly.
+- **Tags are editable.** Each tag has a × to delete it; a text field + Add tag creates one. Deleting the current tag falls back to the first tag.
+- **Tag schedule.** "Up next" queues tags for upcoming blocks, in order — when a block ends, the next queued tag becomes the current tag. Queue the current tag, remove queued tags with ×, save the queue as a named preset, and load a saved preset from the dropdown.
+- **View log.** Opens the log of completed blocks — the Obsidian Focus Log when the sync path is set, otherwise the sessions log.
