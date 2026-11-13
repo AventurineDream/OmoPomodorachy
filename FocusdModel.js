@@ -326,12 +326,30 @@ function removeScheduledTag(schedule, index) {
   return q
 }
 
-// Take the next scheduled tag off the front of the queue. Returns
-// { tag, schedule } or null when the queue is empty.
-function shiftSchedule(schedule) {
+// Drop queued tags that are no longer among the known categories
+// (e.g. a category deleted after it was queued). Returns the filtered
+// queue.
+function filterSchedule(schedule, tags) {
+  var known = parseTags(tags)
   var q = Array.isArray(schedule) ? schedule.slice() : []
-  if (!q.length) return null
-  return { tag: q.shift(), schedule: q }
+  return q.filter(function (t) { return known.indexOf(t) !== -1 })
+}
+
+// Take the next scheduled tag off the front of the queue. Tags that are
+// no longer among the known categories are skipped and dropped, so a
+// deleted category can never jam the queue at block end. Returns
+// { tag, schedule } or null when the queue is empty or holds only
+// unknown tags. The `tags` list is optional: without it, the front tag
+// is taken as-is (the pre-existing behaviour).
+function shiftSchedule(schedule, tags) {
+  var q = Array.isArray(schedule) ? schedule.slice() : []
+  var known = tags ? parseTags(tags) : null
+  while (q.length) {
+    var t = q.shift()
+    if (!known || known.indexOf(t) !== -1)
+      return { tag: t, schedule: q }
+  }
+  return null
 }
 
 // Save a schedule queue as a named preset. The name is trimmed; an
