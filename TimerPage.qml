@@ -339,12 +339,19 @@ Item {
             Layout.preferredWidth: Style.space(78)
           }
 
-          Text {
+          Dropdown {
             Layout.fillWidth: true
-            text: root.timerService ? root.timerService.activePreset : "pomodoro"
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
+            label: ""
+            showLabel: false
+            value: root.timerService ? root.timerService.activePreset : "pomodoro"
+            options: root.timerService ? root.timerService.presets : ["pomodoro"]
+            foreground: root.foreground
+            accent: root.activeColor
+            fontFamily: root.fontFamily
+            onChanged: function (v) {
+              if (root.timerService)
+                root.timerService.setActivePreset(v);
+            }
           }
 
           Button {
@@ -362,13 +369,21 @@ Item {
           width: parent.width
           spacing: Style.space(8)
 
-          Text {
+          TextField {
+            id: presetNameField
             Layout.fillWidth: true
-            text: "Save as (field removed for bisect)"
-            color: root.foreground
-            opacity: 0.5
-            font.family: root.fontFamily
+            placeholderText: "New preset name"
+            foreground: root.foreground
+            accent: root.activeColor
+            fontFamily: root.fontFamily
             font.pixelSize: Style.font.bodySmall
+            onAccepted: {
+              if (root.timerService && text.trim() !== "") {
+                root.timerService.savePresetAs(text.trim());
+                text = "";
+                root.saveAsOpen = false;
+              }
+            }
           }
 
           Button {
@@ -520,13 +535,20 @@ Item {
         width: parent.width
         spacing: Style.space(8)
 
-        Text {
+        TextField {
+          id: newTagField
           Layout.fillWidth: true
-          text: "New tag (field removed for bisect)"
-          color: root.foreground
-          opacity: 0.5
-          font.family: root.fontFamily
+          placeholderText: "New tag"
+          foreground: root.foreground
+          accent: root.activeColor
+          fontFamily: root.fontFamily
           font.pixelSize: Style.font.bodySmall
+          onAccepted: {
+            if (root.timerService && text.trim() !== "") {
+              root.timerService.addTag(text.trim());
+              text = "";
+            }
+          }
         }
 
         Button {
@@ -535,7 +557,12 @@ Item {
           accent: root.activeColor
           fontFamily: root.fontFamily
           fontSize: Style.font.bodySmall
-          onClicked: {}
+          onClicked: {
+            if (root.timerService && newTagField.text.trim() !== "") {
+              root.timerService.addTag(newTagField.text.trim());
+              newTagField.text = "";
+            }
+          }
         }
       }
 
@@ -640,13 +667,19 @@ Item {
             root.timerService.enqueueTag(root.timerService.currentTag)
         }
 
-        Text {
+        Dropdown {
           Layout.fillWidth: true
-          text: root.schedulePresetName
-          color: root.foreground
-          opacity: 0.6
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.bodySmall
+          label: ""
+          showLabel: false
+          value: root.schedulePresetName
+          options: root.timerService ? Object.keys(root.timerService.tagSchedulePresets) : []
+          foreground: root.foreground
+          accent: root.activeColor
+          fontFamily: root.fontFamily
+          onChanged: function (v) {
+            if (root.timerService && root.timerService.loadSchedulePreset(v))
+              root.schedulePresetName = v;
+          }
         }
 
         Button {
@@ -664,13 +697,22 @@ Item {
         width: parent.width
         spacing: Style.space(8)
 
-        Text {
+        TextField {
+          id: scheduleNameField
           Layout.fillWidth: true
-          text: "Schedule name (field removed for bisect)"
-          color: root.foreground
-          opacity: 0.5
-          font.family: root.fontFamily
+          placeholderText: "Schedule preset name"
+          foreground: root.foreground
+          accent: root.activeColor
+          fontFamily: root.fontFamily
           font.pixelSize: Style.font.bodySmall
+          onAccepted: {
+            if (root.timerService && text.trim() !== "") {
+              if (root.timerService.saveSchedulePreset(text.trim()))
+                root.schedulePresetName = text.trim();
+              text = "";
+              root.saveScheduleOpen = false;
+            }
+          }
         }
 
         Button {
@@ -679,7 +721,14 @@ Item {
           accent: root.activeColor
           fontFamily: root.fontFamily
           fontSize: Style.font.bodySmall
-          onClicked: root.saveScheduleOpen = false
+          onClicked: {
+            if (root.timerService && scheduleNameField.text.trim() !== "") {
+              if (root.timerService.saveSchedulePreset(scheduleNameField.text.trim()))
+                root.schedulePresetName = scheduleNameField.text.trim();
+              scheduleNameField.text = "";
+              root.saveScheduleOpen = false;
+            }
+          }
         }
       }
 
