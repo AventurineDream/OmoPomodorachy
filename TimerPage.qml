@@ -25,6 +25,21 @@ Item {
   property string schedulePresetName: ""
   property bool hasSessionData: false
   property int totalActionCount: 2
+  // True while any inline editor has keyboard focus. The panel binds the
+  // key catcher's `blocked` flag to this, so Enter/typing in a text field
+  // does not also fire the panel's activate action (which toggles the
+  // timer). Without it, Enter in the New tag field both added the tag
+  // AND started the timer.
+  readonly property bool editorActive: presetNameField.activeFocus || newTagField.activeFocus || scheduleNameField.activeFocus
+
+  // Emitted when an inline editor is done — Enter accepted, or Escape —
+  // so the panel can hand focus back to the key catcher. Without this,
+  // a field keeps activeFocus after Enter, the catcher stays blocked,
+  // and arrows/Tab/Escape-to-close stop working. Every TextField on
+  // this page must join editorActive AND emit editorDone on both
+  // onAccepted and Keys.onEscapePressed; any future TextField (e.g. a
+  // CSV path field) must follow the same pattern.
+  signal editorDone()
 
   signal updateRequested
   signal infoRequested
@@ -419,7 +434,9 @@ Item {
                 text = "";
                 root.saveAsOpen = false;
               }
+              root.editorDone();
             }
+            Keys.onEscapePressed: root.editorDone()
           }
 
           Button {
@@ -434,6 +451,7 @@ Item {
                 presetNameField.text = "";
                 root.saveAsOpen = false;
               }
+              root.editorDone();
             }
           }
         }
@@ -584,7 +602,9 @@ Item {
               root.timerService.addTag(text.trim());
               text = "";
             }
+            root.editorDone();
           }
+          Keys.onEscapePressed: root.editorDone()
         }
 
         Button {
@@ -598,6 +618,7 @@ Item {
               root.timerService.addTag(newTagField.text.trim());
               newTagField.text = "";
             }
+            root.editorDone();
           }
         }
       }
@@ -761,7 +782,9 @@ Item {
               text = "";
               root.saveScheduleOpen = false;
             }
+            root.editorDone();
           }
+          Keys.onEscapePressed: root.editorDone()
         }
 
         Button {
@@ -777,6 +800,7 @@ Item {
               scheduleNameField.text = "";
               root.saveScheduleOpen = false;
             }
+            root.editorDone();
           }
         }
       }
