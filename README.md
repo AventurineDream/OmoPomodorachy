@@ -100,10 +100,14 @@ Default configuration:
 { "tags": ["Work", "Study", "Art", "Admin", "Other"] }
 ```
 
-`focusLogPath` is where the Obsidian Focus Log goes — a generated markdown table of every completed work block. The whole table is regenerated from the sessions log every time a block ends or a block is retagged, so a retag in the panel updates the vault row too; the note says it is generated, so don't hand-edit its rows (the next block would overwrite them). The parent folder is created if it is missing. The sync is **off by default** — nothing is written to the vault until a path is set. To turn it on, set the path (the proposed location is `20_Practices/Focus/Focus Log.md` in the vault); an existing file at that path is only replaced when it starts with the generated header, so a hand-written note there is left alone:
+`focusLogPath` is where the session log export goes — a generated record of every completed work block, regenerated whole from the sessions log every time a block ends or a block is retagged, so a retag in the panel updates the row too. The path may point **anywhere**, not only an Obsidian vault: a note, a plain folder, a spreadsheet. The format follows the file extension — a path ending in `.csv` writes CSV (`Date,Tag,Minutes`, one row per block), anything else writes the Markdown table. The parent folder is created if it is missing. The export is **off by default** — nothing is written until a path is set. To turn it on, set the path; an existing file at that path is only replaced when it starts with the generated header (the Markdown marker, or the `Date,Tag,Minutes` header row for CSV), so a hand-written file there is left alone. Do not hand-edit the generated rows — the next block would overwrite them:
 
 ```json
 { "focusLogPath": "/home/aven/Projects/Obsidian/Home/20_Practices/Focus/Focus Log.md" }
+```
+
+```json
+{ "focusLogPath": "/home/aven/focus-log.csv" }
 ```
 
 ```json
@@ -162,7 +166,9 @@ Here are my other Omarchy plugins:
 
 Please give a star if you find them useful!
 
-## Panel (1.9.0)
+## Panel (1.10.0)
+
+- **Session log export (1.10.0).** Set `focusLogPath` to any absolute path to export completed blocks there, regenerated whole on every block end or retag. A `.csv` path writes CSV (`Date,Tag,Minutes`); anything else writes the Markdown table. Off by default; an existing file is only replaced when it starts with the generated header.
 
 - **Durations collapses.** The Durations section has a chevron; collapse it to save space. The choice is remembered in `focusd.json` (`durationsExpanded`). The page also scrolls (Flickable), so the schedule area and View log are reachable with Durations expanded.
 - **Wheel scrolling (1.9.1).** The mouse wheel scrolls the page — an explicit WheelHandler moves the Flickable's content (touchpad pixel deltas when present, else 48px per wheel notch). Root cause unknown: nothing in TimerPage or Panel blocks the built-in wheel handler, so if the built-in handling ever starts working, remove the WheelHandler or the page will scroll twice per step. Drag scrolling works too.
@@ -171,4 +177,4 @@ Please give a star if you find them useful!
 - **Rounds hint.** "Rounds: 0 is off." is on its own line so the Durations section fits cleanly.
 - **Tags are editable.** Each tag has a × to delete it; a text field + Add tag creates one. Deleting the current tag falls back to the first tag. Deleting a tag also drops it from the queued schedule, so a deleted tag can never jam the queue — and the block-end advance skips any tag that is no longer a category.
 - **Tag schedule.** "Up next" queues tags for upcoming blocks, in order — when a block ends, the next queued tag becomes the current tag. Queue the current tag, remove queued tags with ×, save the queue as a named preset, and load a saved preset from the dropdown. If a tag or schedule write is refused (config not ready), the panel says so.
-- **View log.** Opens the log of completed blocks — the Obsidian Focus Log when the sync path is set, otherwise the sessions log. The file path is URI-encoded, so a space (as in "Focus Log.md") opens correctly.
+- **View log.** Opens the log of completed blocks — the session export when a path is set (Markdown table or CSV, wherever you pointed it), otherwise the sessions log. The file path is URI-encoded, so a space (as in "Focus Log.md") opens correctly.
