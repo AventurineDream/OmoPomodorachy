@@ -17,6 +17,12 @@ Item {
   property int selectedAction: 0
   property bool resetVisible: false
   property bool addTimeVisible: false
+  // Panel-local toggles: the preset Save As row and the schedule-preset
+  // Save row. The Durations expanded state itself lives on the service
+  // (persisted in focusd.json).
+  property bool saveAsOpen: false
+  property bool saveScheduleOpen: false
+  property string schedulePresetName: 
   property bool hasSessionData: false
   property int totalActionCount: 2
 
@@ -268,7 +274,8 @@ Item {
 
     // Durations: sliders for the active preset's work / break lengths.
     // A change is written to focusd's config.toml on release and takes
-    // effect from the next session of that type.
+    // effect from the next session of that type. The section collapses
+    // to save space; the choice is remembered in focusd.json.
     Column {
       width: parent.width
       spacing: Style.space(10)
@@ -282,6 +289,16 @@ Item {
       RowLayout {
         width: parent.width
         spacing: Style.space(8)
+
+        Button {
+          text: root.timerService && root.timerService.durationsExpanded ? "▾" : "▸"
+          foreground: root.foreground
+          accent: root.activeColor
+          fontFamily: root.fontFamily
+          fontSize: Style.font.bodySmall
+          onClicked: if (root.timerService)
+            root.timerService.setDurationsExpanded(!root.timerService.durationsExpanded)
+        }
 
         Text {
           text: "Durations"
@@ -304,65 +321,161 @@ Item {
         }
       }
 
-      DurationRow {
-        label: "Work"
-        minimum: 5
-        maximum: 90
-        minutes: root.timerService ? root.timerService.workMinutes : 25
-        onReleased: function (v) {
-          if (root.timerService)
-            root.timerService.writeDurations("work", v);
-        }
-      }
+      Column {
+        visible: root.timerService ? root.timerService.durationsExpanded : true
+        width: parent.width
+        spacing: Style.space(10)
 
-      DurationRow {
-        label: "Short break"
-        minimum: 1
-        maximum: 30
-        minutes: root.timerService ? root.timerService.shortBreakMinutes : 5
-        onReleased: function (v) {
-          if (root.timerService)
-            root.timerService.writeDurations("shortBreak", v);
-        }
-      }
+        RowLayout {
+          width: parent.width
+          spacing: Style.space(8)
 
-      DurationRow {
-        label: "Long break"
-        minimum: 5
-        maximum: 60
-        minutes: root.timerService ? root.timerService.longBreakMinutes : 15
-        onReleased: function (v) {
-          if (root.timerService)
-            root.timerService.writeDurations("longBreak", v);
-        }
-      }
+          Text {
+            text: "Preset"
+            color: root.foreground
+            opacity: 0.7
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            Layout.preferredWidth: Style.space(78)
+          }
 
-      // Rounds: how many work sessions run before the timer stops.
-      // 0 is off — run without a limit. Written to focusd.json on release.
-      DurationRow {
-        label: "Rounds"
-        minimum: 0
-        maximum: 12
-        minutes: root.timerService ? root.timerService.rounds : 0
-        suffix: ""
-        zeroText: "off"
-        onReleased: function (v) {
-          if (root.timerService)
-            root.timerService.writeRounds(v);
-        }
-      }
+          Dropdown {
+            Layout.fillWidth: true
+            label: ""
+            showLabel: false
+            value: root.timerService ? root.timerService.activePreset : "pomodoro"
+            options: root.timerService ? root.timerService.presets : ["pomodoro"]
+            foreground: root.foreground
+            accent: root.activeColor
+            fontFamily: root.fontFamily
+            onChanged: function (v) {
+              if (root.timerService)
+                root.timerService.setActivePreset(v);
+            }
+          }
 
-      Text {
-        text: "Applies from the next session of that type. Rounds: 0 is off."
-        color: root.foreground
-        opacity: 0.5
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.bodySmall
+          Button {
+            text: "Save as…"
+            foreground: root.foreground
+            accent: root.activeColor
+            fontFamily: root.fontFamily
+            fontSize: Style.font.bodySmall
+            onClicked: root.saveAsOpen = !root.saveAsOpen
+          }
+        }
+
+        RowLayout {
+          visible: root.saveAsOpen
+          width: parent.width
+          spacing: Style.space(8)
+
+          TextField {
+            id: presetNameField
+            Layout.fillWidth: true
+            placeholderText: "New preset name"
+            foreground: root.foreground
+            accent: root.activeColor
+            fontFamily: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            onAccepted: {
+              if (root.timerService && text.trim() !== "") {
+                root.timerService.savePresetAs(text.trim());
+                text = "";
+                root.saveAsOpen = false;
+              }
+            }
+          }
+
+          Button {
+            text: "Save"
+            foreground: root.foreground
+            accent: root.activeColor
+            fontFamily: root.fontFamily
+            fontSize: Style.font.bodySmall
+            onClicked: {
+              if (root.timerService && presetNameField.text.trim() !== "") {
+                root.timerService.savePresetAs(presetNameField.text.trim());
+                presetNameField.text = "";
+                root.saveAsOpen = false;
+              }
+            }
+          }
+        }
+
+        DurationRow {
+          label: "Work"
+          minimum: 5
+          maximum: 90
+          minutes: root.timerService ? root.timerService.workMinutes : 25
+          onReleased: function (v) {
+            if (root.timerService)
+              root.timerService.writeDurations("work", v);
+          }
+        }
+
+        DurationRow {
+          label: "Short break"
+          minimum: 1
+          maximum: 30
+          minutes: root.timerService ? root.timerService.shortBreakMinutes : 5
+          onReleased: function (v) {
+            if (root.timerService)
+              root.timerService.writeDurations("shortBreak", v);
+          }
+        }
+
+        DurationRow {
+          label: "Long break"
+          minimum: 5
+          maximum: 60
+          minutes: root.timerService ? root.timerService.longBreakMinutes : 15
+          onReleased: function (v) {
+            if (root.timerService)
+              root.timerService.writeDurations("longBreak", v);
+          }
+        }
+
+        // Rounds: how many work sessions run before the timer stops.
+        // 0 is off — run without a limit. Written to focusd.json on release.
+        DurationRow {
+          label: "Rounds"
+          minimum: 0
+          maximum: 12
+          minutes: root.timerService ? root.timerService.rounds : 0
+          suffix: ""
+          zeroText: "off"
+          onReleased: function (v) {
+            if (root.timerService)
+              root.timerService.writeRounds(v);
+          }
+        }
+
+        Text {
+          text: "Applies from the next session of that type."
+          color: root.foreground
+          opacity: 0.5
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+          wrapMode: Text.Wrap
+          width: parent.width
+        }
+
+        Text {
+          text: "Rounds: 0 is off."
+          color: root.foreground
+          opacity: 0.5
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+          wrapMode: Text.Wrap
+          width: parent.width
+        }
       }
     }
 
     // Block tagging: pick a category for the next/current work block,
-    // and fix the tag of the block that just ended.
+    // fix the tag of the block that just ended, queue tags for upcoming
+    // blocks, and save the queue as a preset. Tags can be added and
+    // removed here, and the log of completed blocks is one tap away.
     Column {
       width: parent.width
       spacing: Style.space(10)
@@ -387,17 +500,68 @@ Item {
         Repeater {
           model: root.timerService ? root.timerService.tags : []
 
-          Button {
+          Row {
             required property string modelData
-            text: modelData
-            foreground: root.foreground
-            accent: root.activeColor
-            fontFamily: root.fontFamily
-            fontSize: Style.font.bodySmall
-            // The selected tag reads as the active one.
-            opacity: root.timerService && root.timerService.currentTag === modelData ? 1 : 0.55
-            onClicked: if (root.timerService)
-              root.timerService.setCurrentTag(modelData)
+            spacing: Style.space(2)
+
+            Button {
+              text: modelData
+              foreground: root.foreground
+              accent: root.activeColor
+              fontFamily: root.fontFamily
+              fontSize: Style.font.bodySmall
+              // The selected tag reads as the active one.
+              opacity: root.timerService && root.timerService.currentTag === modelData ? 1 : 0.55
+              onClicked: if (root.timerService)
+                root.timerService.setCurrentTag(modelData)
+            }
+
+            Button {
+              text: "×"
+              tooltipText: "Delete tag " + modelData
+              foreground: root.foreground
+              accent: root.activeColor
+              fontFamily: root.fontFamily
+              fontSize: Style.font.bodySmall
+              opacity: 0.6
+              onClicked: if (root.timerService)
+                root.timerService.removeTag(modelData)
+            }
+          }
+        }
+      }
+
+      RowLayout {
+        width: parent.width
+        spacing: Style.space(8)
+
+        TextField {
+          id: newTagField
+          Layout.fillWidth: true
+          placeholderText: "New tag"
+          foreground: root.foreground
+          accent: root.activeColor
+          fontFamily: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+          onAccepted: {
+            if (root.timerService && text.trim() !== "") {
+              root.timerService.addTag(text.trim());
+              text = "";
+            }
+          }
+        }
+
+        Button {
+          text: "Add tag"
+          foreground: root.foreground
+          accent: root.activeColor
+          fontFamily: root.fontFamily
+          fontSize: Style.font.bodySmall
+          onClicked: {
+            if (root.timerService && newTagField.text.trim() !== "") {
+              root.timerService.addTag(newTagField.text.trim());
+              newTagField.text = "";
+            }
           }
         }
       }
@@ -435,7 +599,151 @@ Item {
       }
 
       Text {
-        text: "Tags the next work block. Tap Last to fix the one that just ended."
+        text: "Up next"
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Flow {
+        width: parent.width
+        spacing: Style.space(8)
+
+        Repeater {
+          model: root.timerService ? root.timerService.tagSchedule : []
+
+          Row {
+            required property int index
+            required property string modelData
+            spacing: Style.space(2)
+
+            Button {
+              text: modelData
+              foreground: root.foreground
+              accent: root.activeColor
+              fontFamily: root.fontFamily
+              fontSize: Style.font.bodySmall
+              enabled: false
+              opacity: 0.8
+            }
+
+            Button {
+              text: "×"
+              tooltipText: "Remove from schedule"
+              foreground: root.foreground
+              accent: root.activeColor
+              fontFamily: root.fontFamily
+              fontSize: Style.font.bodySmall
+              opacity: 0.6
+              onClicked: if (root.timerService)
+                root.timerService.removeScheduledTag(index)
+            }
+          }
+        }
+      }
+
+      Text {
+        visible: root.timerService ? root.timerService.tagSchedule.length === 0 : true
+        text: "Nothing scheduled — the next block keeps the tag above."
+        color: root.foreground
+        opacity: 0.5
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        wrapMode: Text.Wrap
+        width: parent.width
+      }
+
+      RowLayout {
+        width: parent.width
+        spacing: Style.space(8)
+
+        Button {
+          text: "Queue current tag"
+          foreground: root.foreground
+          accent: root.activeColor
+          fontFamily: root.fontFamily
+          fontSize: Style.font.bodySmall
+          onClicked: if (root.timerService)
+            root.timerService.enqueueTag(root.timerService.currentTag)
+        }
+
+        Dropdown {
+          Layout.fillWidth: true
+          label: ""
+          showLabel: false
+          value: root.schedulePresetName
+          options: root.timerService ? Object.keys(root.timerService.tagSchedulePresets) : []
+          foreground: root.foreground
+          accent: root.activeColor
+          fontFamily: root.fontFamily
+          onChanged: function (v) {
+            if (root.timerService && root.timerService.loadSchedulePreset(v))
+              root.schedulePresetName = v;
+          }
+        }
+
+        Button {
+          text: "Save schedule…"
+          foreground: root.foreground
+          accent: root.activeColor
+          fontFamily: root.fontFamily
+          fontSize: Style.font.bodySmall
+          onClicked: root.saveScheduleOpen = !root.saveScheduleOpen
+        }
+      }
+
+      RowLayout {
+        visible: root.saveScheduleOpen
+        width: parent.width
+        spacing: Style.space(8)
+
+        TextField {
+          id: scheduleNameField
+          Layout.fillWidth: true
+          placeholderText: "Schedule preset name"
+          foreground: root.foreground
+          accent: root.activeColor
+          fontFamily: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+          onAccepted: {
+            if (root.timerService && text.trim() !== "") {
+              if (root.timerService.saveSchedulePreset(text.trim()))
+                root.schedulePresetName = text.trim();
+              text = "";
+              root.saveScheduleOpen = false;
+            }
+          }
+        }
+
+        Button {
+          text: "Save"
+          foreground: root.foreground
+          accent: root.activeColor
+          fontFamily: root.fontFamily
+          fontSize: Style.font.bodySmall
+          onClicked: {
+            if (root.timerService && scheduleNameField.text.trim() !== "") {
+              if (root.timerService.saveSchedulePreset(scheduleNameField.text.trim()))
+                root.schedulePresetName = scheduleNameField.text.trim();
+              scheduleNameField.text = "";
+              root.saveScheduleOpen = false;
+            }
+          }
+        }
+      }
+
+      Button {
+        text: "View log"
+        foreground: root.foreground
+        accent: root.activeColor
+        fontFamily: root.fontFamily
+        fontSize: Style.font.bodySmall
+        onClicked: if (root.timerService)
+          root.timerService.openLog()
+      }
+
+      Text {
+        text: "Tags the next work block. Tap Last to fix the one that just ended. Queued tags apply to the blocks after it, in order."
         color: root.foreground
         opacity: 0.5
         font.family: root.fontFamily

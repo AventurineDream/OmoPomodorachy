@@ -49,11 +49,15 @@ Item {
   // Loaded from the TOML on the 10s poll, written back on slider release.
   // A change takes effect from the next session of that type.
   property string activePreset: "pomodoro"
+  property var presets: []
   property int workMinutes: 25
   property int shortBreakMinutes: 5
   property int longBreakMinutes: 15
   property string durationsRaw: ""
   property bool durationsApplied: false
+  // Whether the Durations section in the panel is expanded. Persisted
+  // in focusd.json so the choice sticks across shell restarts.
+  property bool durationsExpanded: true
   // A slider release is waiting on a fresh re-read of the TOML. The
   // cached text can be up to 10s old, and a change made in the focusd
   // TUI inside that window would be overwritten if the write used it.
@@ -63,6 +67,12 @@ Item {
   property bool pendingWrite: false
   property string pendingWriteKind: ""
   property int pendingWriteValue: 0
+  // A preset switch or Save As is waiting on a fresh re-read of the
+  // TOML (same reason as the duration write: the cached text can be up
+  // to 10s old). pendingPresetOp is "setPreset" or "savePreset";
+  // pendingPresetArg is the preset name.
+  property string pendingPresetOp: ""
+  property string pendingPresetArg: ""
 
   // Rounds before stop (Phase 4). `rounds` is how many work sessions run
   // before the timer stops (0 = off, unlimited); `roundsCompleted` is how
@@ -88,6 +98,14 @@ Item {
   property string currentTag: "Work"
   property var lastWorkSession: null
   property var sessionLog: []
+  // Tag schedule: an ordered queue of tags for upcoming work blocks,
+  // from focusd.json (`tagSchedule`). When a work block ends, the next
+  // tag is taken from the front of the queue and becomes the current tag
+  // for the block after it; an empty queue leaves the current tag alone.
+  // Named schedule presets (`tagSchedulePresets`: name -> tag array)
+  // save a queue for reuse.
+  property var tagSchedule: []
+  property var tagSchedulePresets: ({})
   readonly property string sessionsPath: Quickshell.env("HOME") + "/.config/omarchy/focusd-sessions.json"
   property string sessionsRaw: ""
   property bool sessionsApplied: false
@@ -180,6 +198,16 @@ Item {
     root.tags = Model.parseTags(tg);
     if (root.tags.indexOf(root.currentTag) === -1)
       root.currentTag = root.tags[0];
+    // Tag schedule: the queue of tags for upcoming blocks, and the named
+    // schedule presets. A missing or malformed value is an empty queue /
+    // no presets — the schedule is only ever written by this plugin.
+    var ts = root.fileConfig && root.fileConfig.tagSchedule;
+    root.tagSchedule = Array.isArray(ts) ? ts.filter(function (t) { return root.tags.indexOf(String(t)) !== -1; }) : [];
+    var tsp = root.fileConfig && root.fileConfig.tagSchedulePresets;
+    root.tagSchedulePresets = (tsp && typeof tsp === "object" && !Array.isArray(tsp)) ? tsp : ({});
+    // Durations section collapsed or expanded. Defaults to expanded.
+    var de = root.fileConfig && root.fileConfig.durationsExpanded;
+    root.durationsExpanded = (de === undefined || de === null) ? true : !!de;
     // Obsidian sync (Phase 6): where the generated Focus Log goes. Off
     // by default — an empty focusLogPath until Aven okays direct vault
     // writes; a path in focusd.json turns it on (must be absolute).
@@ -262,34 +290,134 @@ Item {
     root.configure();
   }
 
-  // A Rounds slider release writes only the rounds key to focusd.json,
-  // built from the last-read config so the other keys are kept. Two
-  // guards: the write is refused while the last read failed or the file
+  // Write one key of focusd.json, from the last-read config so the
+  // other keys are kept. Refused while the last read failed or the file
   // is invalid (configOk false — the cached config is {} then, and
-  // writing from it would wipe the other keys), and the cached config
-  // is updated with the new value so a second move compares against the
-  // value just written instead of the stale one. The file is written
-  // only by this plugin (and a hand edit), so there is no programmatic
-  // writer to race the way the focusd TUI races config.toml. The 10s
-  // poll re-reads the file and confirms the write; if it failed, the
-  // slider snaps back to the file's value.
+  // writing from it would wipe the other keys). The cached config is
+  // updated with the new value so a second write compares against the
+  // value just written. The 10s poll re-reads the file and confirms the
+  // write; if it failed, the panel snaps back to the file's value.
+  // Returns false when the write was refused or nothing changed.
+  function writeFocusdJson(key, value) {
+    if (!root.configOk)
+      return false;
+    var cfg = root.fileConfig || {};
+    if (JSON.stringify(cfg[key]) === JSON.stringify(value))
+      return false;
+    cfg[key] = value;
+    var updated = Model.setJsonKey(JSON.stringify(cfg), key, value);
+    root.configRaw = updated;
+    root.fileConfig = cfg;
+    Quickshell.execDetached(["bash", root.writeScriptPath, "--create", root.focusdJsonPath, updated]);
+    return true;
+  }
+
+  // A Rounds slider release writes only the rounds key to focusd.json.
+  // The file is written only by this plugin (and a hand edit), so there
+  // is no programmatic writer to race the way the focusd TUI races
+  // config.toml.
   function writeRounds(value) {
     var v = Model.clampRounds(value);
     if (v === null)
       return;
-    if (!root.configOk)
+    if (!root.writeFocusdJson("rounds", v))
       return;
-    var cfg = root.fileConfig || {};
-    // Skip the write when the file already has this value (e.g. the
-    // slider was released without moving).
-    if (cfg.rounds === v)
-      return;
-    cfg.rounds = v;
     root.rounds = v;
-    var updated = Model.setJsonKey(JSON.stringify(cfg), "rounds", v);
-    root.configRaw = updated;
-    root.fileConfig = cfg;
-    Quickshell.execDetached(["bash", root.writeScriptPath, "--create", root.focusdJsonPath, updated]);
+  }
+
+  // Whether the Durations section is expanded. Persisted so the choice
+  // sticks across shell restarts.
+  function setDurationsExpanded(expanded) {
+    root.durationsExpanded = !!expanded;
+    root.writeFocusdJson("durationsExpanded", root.durationsExpanded);
+  }
+
+  // Tag add/remove (from the panel). Adding sets the new tag as the
+  // current tag; removing falls back to the first tag when the current
+  // one is removed. Both write focusd.json `tags`.
+  function addTag(name) {
+    var next = Model.addTag(root.tags, name);
+    if (next === null)
+      return false;
+    if (!root.writeFocusdJson("tags", next))
+      return false;
+    root.tags = next;
+    root.currentTag = String(name).trim();
+    return true;
+  }
+
+  function removeTag(name) {
+    var next = Model.removeTag(root.tags, name);
+    if (next === null)
+      return false;
+    if (!root.writeFocusdJson("tags", next))
+      return false;
+    root.tags = next;
+    if (root.tags.indexOf(root.currentTag) === -1)
+      root.currentTag = root.tags[0];
+    return true;
+  }
+
+  // Tag schedule: queue a tag for an upcoming block, drop a queued tag,
+  // save the queue as a named preset, load a preset into the queue, or
+  // delete a preset. All persist to focusd.json. Loading a preset
+  // replaces the queue; the current block keeps its tag — the queue
+  // applies to the blocks after it.
+  function enqueueTag(tag) {
+    var next = Model.enqueueTag(root.tagSchedule, tag, root.tags);
+    if (next === null)
+      return false;
+    if (!root.writeFocusdJson("tagSchedule", next))
+      return false;
+    root.tagSchedule = next;
+    return true;
+  }
+
+  function removeScheduledTag(index) {
+    var next = Model.removeScheduledTag(root.tagSchedule, index);
+    if (next === null)
+      return false;
+    if (!root.writeFocusdJson("tagSchedule", next))
+      return false;
+    root.tagSchedule = next;
+    return true;
+  }
+
+  function saveSchedulePreset(name) {
+    var next = Model.saveSchedulePreset(root.tagSchedulePresets, name, root.tagSchedule);
+    if (next === null)
+      return false;
+    if (!root.writeFocusdJson("tagSchedulePresets", next))
+      return false;
+    root.tagSchedulePresets = next;
+    return true;
+  }
+
+  function loadSchedulePreset(name) {
+    var next = Model.loadSchedulePreset(root.tagSchedulePresets, name);
+    if (next === null)
+      return false;
+    if (!root.writeFocusdJson("tagSchedule", next))
+      return false;
+    root.tagSchedule = next;
+    return true;
+  }
+
+  function deleteSchedulePreset(name) {
+    var next = Model.deleteSchedulePreset(root.tagSchedulePresets, name);
+    if (next === null)
+      return false;
+    if (!root.writeFocusdJson("tagSchedulePresets", next))
+      return false;
+    root.tagSchedulePresets = next;
+    return true;
+  }
+
+  // Open the log of completed blocks: the Obsidian Focus Log when the
+  // sync path is set, otherwise the sessions log itself.
+  function openLog() {
+    var p = root.focusLogPath || root.sessionsPath;
+    Qt.openUrlExternally("file://" + p);
   }
 
   Timer {
@@ -326,21 +454,35 @@ Item {
 
   function applyDurations(ok, raw) {
     var next = ok ? String(raw || "") : "";
-    if (root.pendingWrite) {
-      // A slider release is waiting on this fresh read. Only the released
-      // slider's key is written, on top of the fresh text — the other
-      // sliders may hold stale values (a change made in the focusd TUI
-      // inside the poll window), and passing those in would write them
-      // back over the TUI change. If the read failed, write nothing; the
-      // next poll snaps the sliders back. A write that changes nothing is
-      // skipped.
+    if (root.pendingPresetOp !== "" || root.pendingWrite) {
+      // A preset switch / Save As and/or a slider release is waiting on
+      // this fresh read. Apply the preset op first, then the duration
+      // write, on top of the fresh text — the other sliders may hold
+      // stale values, so only the released key is ever passed in. If
+      // the read failed, write nothing; the next poll snaps the panel
+      // back. A write that changes nothing is skipped.
+      var op = root.pendingPresetOp;
+      var arg = root.pendingPresetArg;
       var kind = root.pendingWriteKind;
       var value = root.pendingWriteValue;
+      root.pendingPresetOp = "";
+      root.pendingPresetArg = "";
       root.pendingWrite = false;
       root.pendingWriteKind = "";
       if (ok) {
-        var updated = Model.updateDuration(next, kind, value);
-        if (updated !== null && updated !== next) {
+        var updated = next;
+        if (op === "setPreset")
+          updated = Model.setActivePreset(updated, arg);
+        else if (op === "savePreset")
+          updated = Model.savePresetAs(updated, arg, root.workMinutes, root.shortBreakMinutes, root.longBreakMinutes);
+        if (updated === null)
+          updated = next;
+        if (kind) {
+          var dur = Model.updateDuration(updated, kind, value);
+          if (dur !== null)
+            updated = dur;
+        }
+        if (updated !== next) {
           root.durationsRaw = updated;
           // Run through bash explicitly: the script's executable bit does
           // not survive a push through the GitHub API, and bash reads it
@@ -357,6 +499,7 @@ Item {
     var parsed = Model.parseDurations(next);
     if (!parsed)
       return;
+    root.presets = Model.listPresets(next);
     root.activePreset = parsed.preset;
     root.workMinutes = parsed.work;
     root.shortBreakMinutes = parsed.shortBreak;
@@ -371,6 +514,32 @@ Item {
   // released key is ever passed in. The 10s poll re-reads the file and
   // confirms the write; if it failed, the sliders snap back to the
   // file's values.
+  // Switch the active preset (from the panel menu). Re-reads
+  // config.toml fresh, then writes the new active_preset on top of that
+  // fresh text (in applyDurations) — the cached text can be up to 10s
+  // old, so writing from it could overwrite a change made in the focusd
+  // TUI in that window. The 10s poll re-reads the file and confirms the
+  // write; if it failed, the menu snaps back to the file's preset.
+  function setActivePreset(name) {
+    if (root.presets.indexOf(String(name)) === -1)
+      return;
+    if (String(name) === root.activePreset)
+      return;
+    root.pendingPresetOp = "setPreset";
+    root.pendingPresetArg = String(name);
+    root.loadDurations();
+  }
+
+  // Save the current slider values as a preset (new or existing) and
+  // make it active. Same fresh re-read as a preset switch.
+  function savePresetAs(name) {
+    if (Model.validPresetName(name) === null)
+      return;
+    root.pendingPresetOp = "savePreset";
+    root.pendingPresetArg = String(name).trim();
+    root.loadDurations();
+  }
+
   function writeDurations(kind, value) {
     var v = Math.round(Number(value));
     if (kind === "work") root.workMinutes = v;
@@ -785,6 +954,15 @@ Item {
         root.lastWorkSession = entry;
         Quickshell.execDetached(["bash", root.writeScriptPath, "--create", root.sessionsPath, logText]);
         root.writeFocusLog();
+      }
+      // Tag schedule: the block that just ended was tagged with the
+      // current tag, so take the next scheduled tag for the block after
+      // it. An empty queue leaves the current tag alone.
+      var shifted = Model.shiftSchedule(root.tagSchedule);
+      if (shifted && root.tags.indexOf(shifted.tag) !== -1) {
+        root.tagSchedule = shifted.schedule;
+        root.currentTag = shifted.tag;
+        root.writeFocusdJson("tagSchedule", shifted.schedule);
       }
       if (Model.shouldStopAfterRound(root.rounds, root.roundsCompleted)) {
         runEnded = true;
