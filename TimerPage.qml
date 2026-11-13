@@ -22,7 +22,7 @@ Item {
   // (persisted in focusd.json).
   property bool saveAsOpen: false
   property bool saveScheduleOpen: false
-  property string schedulePresetName: 
+  property string schedulePresetName: ""
   property bool hasSessionData: false
   property int totalActionCount: 2
 
