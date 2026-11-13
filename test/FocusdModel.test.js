@@ -6,7 +6,7 @@ const os = require("os");
 const { execFileSync } = require("child_process");
 const src = fs.readFileSync(path.join(__dirname, "..", "FocusdModel.js"), "utf8");
 const factory = new Function(
-  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, presetSection, updateDuration, listPresets, setActivePreset, validPresetName, savePresetAs, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, addTag, removeTag, enqueueTag, removeScheduledTag, filterSchedule, shiftSchedule, saveSchedulePreset, loadSchedulePreset, deleteSchedulePreset, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, setJsonKey, configTextOk, FOCUS_LOG_HEADER, focusLogText, focusLogCommand };"
+  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, presetSection, updateDuration, listPresets, setActivePreset, validPresetName, savePresetAs, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, addTag, removeTag, enqueueTag, removeScheduledTag, filterSchedule, shiftSchedule, saveSchedulePreset, loadSchedulePreset, deleteSchedulePreset, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, setJsonKey, configTextOk, FOCUS_LOG_HEADER, FOCUS_LOG_CSV_HEADER, focusLogFormat, focusLogText, focusLogCsvText, focusLogCommand };"
 );
 const M = factory();
 
@@ -300,6 +300,19 @@ check("focusLogText: rows are one per block", M.focusLogText(SAMPLE_LOG_JSON).in
 check("focusLogText: a retag changes the vault row", M.focusLogText(M.retagSessionLog(SAMPLE_LOG_JSON, "Study")).indexOf("| 2026-11-11 | Study | 15 |") !== -1 && M.focusLogText(M.retagSessionLog(SAMPLE_LOG_JSON, "Study")).indexOf("| Art |") === -1);
 check("focusLogText: a pipe in a tag cannot break the table", M.focusLogText('[{"date":"2026-11-11","tag":"A|B","minutes":25}]').indexOf("| A/B |") !== -1);
 check("focusLogText: an invalid log is just the header", M.focusLogText("{oops").trim() === M.FOCUS_LOG_HEADER.trim());
+// --- Log export: CSV by extension (1.10.0) ---
+check("focusLogFormat: .csv is csv", M.focusLogFormat("/home/aven/focus.csv") === "csv");
+check("focusLogFormat: .CSV is csv (any case)", M.focusLogFormat("/home/aven/Focus.CSV") === "csv");
+check("focusLogFormat: .md is md", M.focusLogFormat("/home/aven/Focus Log.md") === "md");
+check("focusLogFormat: no extension is md", M.focusLogFormat("/home/aven/focus-log") === "md");
+check("focusLogFormat: empty path is md", M.focusLogFormat("") === "md");
+check("focusLogCsvText: header is the column row", M.focusLogCsvText("").split("\n")[0] === "Date,Tag,Minutes");
+check("focusLogCsvText: rows are one per block", M.focusLogCsvText(SAMPLE_LOG_JSON).indexOf("2026-11-11,Work,25") !== -1 && M.focusLogCsvText(SAMPLE_LOG_JSON).indexOf("2026-11-11,Art,15") !== -1);
+check("focusLogCsvText: empty log is just the header", M.focusLogCsvText("").trim() === M.FOCUS_LOG_CSV_HEADER);
+check("focusLogCsvText: an invalid log is just the header", M.focusLogCsvText("{oops").trim() === M.FOCUS_LOG_CSV_HEADER);
+check("focusLogCsvText: a comma in a tag is quoted", M.focusLogCsvText('[{"date":"2026-11-11","tag":"A,B","minutes":25}]').indexOf('"A,B"') !== -1);
+check("focusLogCsvText: a quote in a tag is doubled and quoted", M.focusLogCsvText('[{"date":"2026-11-11","tag":"A\\"B","minutes":25}]').indexOf('"A""B"') !== -1);
+check("focusLogCsvText: a retag changes the csv row", M.focusLogCsvText(M.retagSessionLog(SAMPLE_LOG_JSON, "Study")).indexOf("2026-11-11,Study,15") !== -1 && M.focusLogCsvText(M.retagSessionLog(SAMPLE_LOG_JSON, "Study")).indexOf(",Art,") === -1);
 var FOCUS_CMD = M.focusLogCommand("/x/write-config", "/home/aven/Projects/Obsidian/Home/20_Practices/Focus/Focus Log.md", "TABLE");
 check("focusLogCommand: starts with sh -c", FOCUS_CMD[0] === "sh" && FOCUS_CMD[1] === "-c");
 check("focusLogCommand: mkdirs the parent dir then execs write-config --create", FOCUS_CMD[2].indexOf('mkdir -p "$(dirname "$1")"') !== -1 && FOCUS_CMD[2].indexOf('exec bash "$2" --create "$1" "$3"') !== -1);
@@ -312,6 +325,7 @@ check("focusLogCommand: an empty path is null", M.focusLogCommand("/x/write-conf
 // from"), with the pre-rename string as a fallback, so an old-header
 // Focus Log is still recognised as generated.
 check("focusLogCommand: guard checks the existing file for the generated marker", FOCUS_CMD[2].indexOf('[ -e "$1" ]') !== -1 && FOCUS_CMD[2].indexOf("grep -qE") !== -1 && FOCUS_CMD[2].indexOf("This note is generated from") !== -1 && FOCUS_CMD[2].indexOf("Sessions logged by OmoPomodorachy") !== -1 && FOCUS_CMD[2].indexOf("exit 0") !== -1);
+check("focusLogCommand: guard also accepts the CSV header row", FOCUS_CMD[2].indexOf("^Date,Tag,Minutes") !== -1);
 // Run the real argv against a stub write-config: a missing file is
 // written, a generated file is rewritten, a hand-written file is left
 // alone. The stub stands in for write-config --create (path, content).
