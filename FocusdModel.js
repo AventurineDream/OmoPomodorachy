@@ -593,6 +593,41 @@ function configTextOk(text) {
 // next block would overwrite.
 var FOCUS_LOG_HEADER = "# Focus Log\n\nSessions logged by OmaPomodorchy — one row per completed work block. This note is generated from ~/.config/omarchy/focusd-sessions.json; change a block's tag in the panel's Last row, not by editing this table.\n\n| Date | Tag | Minutes |\n| --- | --- | --- |"
 
+// The export format is chosen by the log path's extension: a path ending
+// in .csv (any case) writes CSV, anything else writes the Markdown table.
+// That keeps the export pointable anywhere — an Obsidian note, a plain
+// folder, a spreadsheet — with no extra setting to learn. The format
+// lives in the filename, so renaming the file changes the format.
+function focusLogFormat(focusLogPath) {
+  var path = String(focusLogPath || "").toLowerCase();
+  return path.slice(-4) === ".csv" ? "csv" : "md";
+}
+
+var FOCUS_LOG_CSV_HEADER = "Date,Tag,Minutes";
+
+// One CSV field, RFC 4180: wrap in double quotes when it holds a comma,
+// a quote, or a newline, and double any embedded quotes.
+function csvField(value) {
+  var s = String(value == null ? "" : value);
+  if (/[",\n\r]/.test(s))
+    return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+// Build the full Focus Log CSV from the sessions log text. One row per
+// completed block, same rows as the Markdown table, tags CSV-escaped so
+// a comma or quote in a tag can never break the columns. An empty or
+// invalid log is just the header (no rows).
+function focusLogCsvText(text) {
+  var log = parseSessionLog(text);
+  var out = [FOCUS_LOG_CSV_HEADER];
+  for (var i = 0; i < log.length; i++) {
+    var e = log[i];
+    out.push(e.date + "," + csvField(e.tag || "") + "," + e.minutes);
+  }
+  return out.join("\n") + "\n";
+}
+
 // Build the full Focus Log note text from the sessions log text. Tags
 // are scrubbed of pipes and newlines so a tag can never break the
 // table. An empty or invalid log is just the header (no rows).
@@ -607,24 +642,27 @@ function focusLogText(text) {
   return out.join("\n") + "\n"
 }
 
-// The argv for writing the Focus Log to the vault: create the parent
-// folder if it is missing, then atomically replace the note with the
-// new table (write-config --create). Paths and content travel as
-// positional arguments, quoted in the script, so a path with spaces or
-// a table with quotes is data, never syntax. Returns null when the log
-// path is not an absolute path (an empty path disables the sync).
-// Overwrite guard: an existing file is only replaced when it starts
-// with the generated header — a hand-written note at that path is left
-// alone, and the write is skipped silently. The marker is
+// The argv for writing the Focus Log export: create the parent folder if
+// it is missing, then atomically replace the file with the new export
+// (write-config --create). The path may point anywhere — an Obsidian
+// note, a plain folder, a spreadsheet — not only the vault. Paths and
+// content travel as positional arguments, quoted in the script, so a
+// path with spaces or a table with quotes is data, never syntax.
+// Returns null when the log path is not an absolute path (an empty path
+// disables the sync).
+// Overwrite guard: an existing file is only replaced when it starts with
+// the generated header — a hand-written file at that path is left alone,
+// and the write is skipped silently. For Markdown the marker is
 // name-independent ("This note is generated from", present in every
 // generated header), with the pre-rename string ("Sessions logged by
 // OmoPomodorachy") as a fallback, so a Focus Log written before the
 // rename is still recognised as generated and gets rewritten rather
-// than silently never updating.
+// than silently never updating. For CSV the marker is the header row
+// itself ("Date,Tag,Minutes" as the first line).
 function focusLogCommand(writeScriptPath, focusLogPath, tableText) {
   var path = String(focusLogPath || "")
   if (!path || path.charAt(0) !== "/") return null
   return ["sh", "-c",
-    'mkdir -p "$(dirname "$1")" && if [ -e "$1" ] && ! head -n 3 "$1" | grep -qE "This note is generated from|Sessions logged by OmoPomodorachy"; then exit 0; fi && exec bash "$2" --create "$1" "$3"',
+    'mkdir -p "$(dirname "$1")" && if [ -e "$1" ] && ! head -n 3 "$1" | grep -qE "This note is generated from|Sessions logged by OmoPomodorachy|^Date,Tag,Minutes"; then exit 0; fi && exec bash "$2" --create "$1" "$3"',
     "sh", path, String(writeScriptPath || ""), String(tableText || "")]
 }
