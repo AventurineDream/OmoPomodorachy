@@ -344,6 +344,16 @@ Panel {
         root.switchPanel(direction);
       }
 
+      // When an inline editor is done (Enter accepted, or Escape), hand
+      // focus back to the key catcher. Without this, the field keeps
+      // activeFocus, the catcher stays blocked, and arrows/Tab/
+      // Escape-to-close stop working. Retargets automatically when the
+      // timer page reloads.
+      Connections {
+        target: timerPageLoader.item
+        function onEditorDone() { keyCatcher.forceActiveFocus(); }
+      }
+
       Column {
         id: content
         width: parent.width
