@@ -375,7 +375,7 @@ Item {
             placeholderText: "New preset name"
             foreground: root.foreground
             accent: root.activeColor
-            fontFamily: root.fontFamily
+            font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
             onAccepted: {
               if (root.timerService && text.trim() !== "") {
@@ -541,7 +541,7 @@ Item {
           placeholderText: "New tag"
           foreground: root.foreground
           accent: root.activeColor
-          fontFamily: root.fontFamily
+          font.family: root.fontFamily
           font.pixelSize: Style.font.bodySmall
           onAccepted: {
             if (root.timerService && text.trim() !== "") {
@@ -703,7 +703,7 @@ Item {
           placeholderText: "Schedule preset name"
           foreground: root.foreground
           accent: root.activeColor
-          fontFamily: root.fontFamily
+          font.family: root.fontFamily
           font.pixelSize: Style.font.bodySmall
           onAccepted: {
             if (root.timerService && text.trim() !== "") {
