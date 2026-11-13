@@ -339,19 +339,12 @@ Item {
             Layout.preferredWidth: Style.space(78)
           }
 
-          Dropdown {
+          Text {
             Layout.fillWidth: true
-            label: ""
-            showLabel: false
-            value: root.timerService ? root.timerService.activePreset : "pomodoro"
-            options: root.timerService ? root.timerService.presets : ["pomodoro"]
-            foreground: root.foreground
-            accent: root.activeColor
-            fontFamily: root.fontFamily
-            onChanged: function (v) {
-              if (root.timerService)
-                root.timerService.setActivePreset(v);
-            }
+            text: root.timerService ? root.timerService.activePreset : "pomodoro"
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
           }
 
           Button {
@@ -667,19 +660,13 @@ Item {
             root.timerService.enqueueTag(root.timerService.currentTag)
         }
 
-        Dropdown {
+        Text {
           Layout.fillWidth: true
-          label: ""
-          showLabel: false
-          value: root.schedulePresetName
-          options: root.timerService ? Object.keys(root.timerService.tagSchedulePresets) : []
-          foreground: root.foreground
-          accent: root.activeColor
-          fontFamily: root.fontFamily
-          onChanged: function (v) {
-            if (root.timerService && root.timerService.loadSchedulePreset(v))
-              root.schedulePresetName = v;
-          }
+          text: root.schedulePresetName
+          color: root.foreground
+          opacity: 0.6
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
         }
 
         Button {
