@@ -319,6 +319,11 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
+      // Stand down while an inline editor has focus, so Enter/typing in
+      // a text field does not also fire the panel's activate action
+      // (which toggles the timer). The timer page exposes editorActive
+      // for exactly this; the info page has no editors.
+      blocked: timerPageLoader.item ? timerPageLoader.item.editorActive : false
 
       onMoveRequested: function (dx, dy) {
         if (dx !== 0)
