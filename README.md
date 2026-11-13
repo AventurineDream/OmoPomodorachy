@@ -170,8 +170,7 @@ Please give a star if you find them useful!
 
 ## Panel (1.10.0)
 
-- **Session log export (1.10.0).** Set `focusLogPath` to any absolute path to export completed blocks there, regenerated whole on every block end or retag. A `.csv` path writes CSV (`Date,Tag,Minutes`); anything else writes the Markdown table. Off by default; an existing file is only replaced when it starts with the generated header.
-
+- **Session log export (1.10.0).** Set `focusLogPath` to any absolute path to export completed blocks there, regenerated whole on every block end or retag. A `.csv` path writes CSV (`Date,Tag,Minutes,Source`); anything else writes the Markdown table. Off by default; an existing file is only replaced when it starts with the generated header.
 - **Durations collapses.** The Durations section has a chevron; collapse it to save space. The choice is remembered in `focusd.json` (`durationsExpanded`). The page also scrolls (Flickable), so the schedule area and View log are reachable with Durations expanded.
 - **Wheel scrolling (1.9.1).** The mouse wheel scrolls the page — an explicit WheelHandler moves the Flickable's content (touchpad pixel deltas when present, else 48px per wheel notch). Root cause unknown: nothing in TimerPage or Panel blocks the built-in wheel handler, so if the built-in handling ever starts working, remove the WheelHandler or the page will scroll twice per step. Drag scrolling works too.
 - **Enter in a text field (1.9.2).** Pressing Enter while typing in a text field (new tag, preset name, schedule name) no longer also toggles the timer. The panel's key catcher stands down (`blocked`) while any editor has focus, exactly as its docs require — previously Enter both added the tag and started/paused the timer.
