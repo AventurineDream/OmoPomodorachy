@@ -319,6 +319,11 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
+      // Stand down while an inline editor has focus, so Enter/typing in
+      // a text field does not also fire the panel's activate action
+      // (which toggles the timer). The timer page exposes editorActive
+      // for exactly this; the info page has no editors.
+      blocked: timerPageLoader.item ? timerPageLoader.item.editorActive : false
 
       onMoveRequested: function (dx, dy) {
         if (dx !== 0)
@@ -337,6 +342,16 @@ Panel {
       }
       onTabRequested: function (direction) {
         root.switchPanel(direction);
+      }
+
+      // When an inline editor is done (Enter accepted, or Escape), hand
+      // focus back to the key catcher. Without this, the field keeps
+      // activeFocus, the catcher stays blocked, and arrows/Tab/
+      // Escape-to-close stop working. Retargets automatically when the
+      // timer page reloads.
+      Connections {
+        target: timerPageLoader.item
+        function onEditorDone() { keyCatcher.forceActiveFocus(); }
       }
 
       Column {
