@@ -1,4 +1,4 @@
-# OmoPomodorachy
+# OmaPomodorchy
 
 A beautiful [Focusd](https://github.com/BibekBhusal0/focusd) pomodoro timer for the Omarchy bar. Shows the current session and remaining time with a state icon, and opens a control panel with pause, skip, and stop actions plus your streak, sessions, history, and daily goal.
 
