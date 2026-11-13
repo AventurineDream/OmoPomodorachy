@@ -451,6 +451,7 @@ Item {
                 presetNameField.text = "";
                 root.saveAsOpen = false;
               }
+              root.editorDone();
             }
           }
         }
@@ -617,6 +618,7 @@ Item {
               root.timerService.addTag(newTagField.text.trim());
               newTagField.text = "";
             }
+            root.editorDone();
           }
         }
       }
@@ -798,6 +800,7 @@ Item {
               scheduleNameField.text = "";
               root.saveScheduleOpen = false;
             }
+            root.editorDone();
           }
         }
       }
