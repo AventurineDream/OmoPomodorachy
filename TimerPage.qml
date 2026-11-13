@@ -32,6 +32,15 @@ Item {
   // AND started the timer.
   readonly property bool editorActive: presetNameField.activeFocus || newTagField.activeFocus || scheduleNameField.activeFocus
 
+  // Emitted when an inline editor is done — Enter accepted, or Escape —
+  // so the panel can hand focus back to the key catcher. Without this,
+  // a field keeps activeFocus after Enter, the catcher stays blocked,
+  // and arrows/Tab/Escape-to-close stop working. Every TextField on
+  // this page must join editorActive AND emit editorDone on both
+  // onAccepted and Keys.onEscapePressed; any future TextField (e.g. a
+  // CSV path field) must follow the same pattern.
+  signal editorDone()
+
   signal updateRequested
   signal infoRequested
   signal actionHovered(int index, bool hovered)
@@ -425,7 +434,9 @@ Item {
                 text = "";
                 root.saveAsOpen = false;
               }
+              root.editorDone();
             }
+            Keys.onEscapePressed: root.editorDone()
           }
 
           Button {
@@ -590,7 +601,9 @@ Item {
               root.timerService.addTag(text.trim());
               text = "";
             }
+            root.editorDone();
           }
+          Keys.onEscapePressed: root.editorDone()
         }
 
         Button {
@@ -767,7 +780,9 @@ Item {
               text = "";
               root.saveScheduleOpen = false;
             }
+            root.editorDone();
           }
+          Keys.onEscapePressed: root.editorDone()
         }
 
         Button {
