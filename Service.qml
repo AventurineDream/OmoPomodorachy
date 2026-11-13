@@ -106,6 +106,10 @@ Item {
   // save a queue for reuse.
   property var tagSchedule: []
   property var tagSchedulePresets: ({})
+  // Set when a tag or schedule write was refused (the config read
+  // failed, so writing from the cached view could wipe other keys).
+  // The panel shows a hint; it clears on the next successful write.
+  property bool tagWriteRefused: false
   readonly property string sessionsPath: Quickshell.env("HOME") + "/.config/omarchy/focusd-sessions.json"
   property string sessionsRaw: ""
   property bool sessionsApplied: false
@@ -332,6 +336,19 @@ Item {
     root.writeFocusdJson("durationsExpanded", root.durationsExpanded);
   }
 
+  // Write a tag/schedule key to focusd.json, recording a refusal so
+  // the panel can hint at it. A write that changes nothing is not a
+  // refusal — only a failed config read refuses the write.
+  function writeTagJson(key, value) {
+    if (root.writeFocusdJson(key, value)) {
+      root.tagWriteRefused = false;
+      return true;
+    }
+    if (!root.configOk)
+      root.tagWriteRefused = true;
+    return false;
+  }
+
   // Tag add/remove (from the panel). Adding sets the new tag as the
   // current tag; removing falls back to the first tag when the current
   // one is removed. Both write focusd.json `tags`.
@@ -339,7 +356,7 @@ Item {
     var next = Model.addTag(root.tags, name);
     if (next === null)
       return false;
-    if (!root.writeFocusdJson("tags", next))
+    if (!root.writeTagJson("tags", next))
       return false;
     root.tags = next;
     root.currentTag = String(name).trim();
@@ -350,11 +367,20 @@ Item {
     var next = Model.removeTag(root.tags, name);
     if (next === null)
       return false;
-    if (!root.writeFocusdJson("tags", next))
+    if (!root.writeTagJson("tags", next))
       return false;
     root.tags = next;
     if (root.tags.indexOf(root.currentTag) === -1)
       root.currentTag = root.tags[0];
+    // A queued tag that no longer exists would jam the queue at block
+    // end. Drop it from the queue now and persist the filtered queue.
+    // (If this write is refused, the block-end shift skips unknown
+    // tags, so the queue still cannot jam.)
+    var q = Model.filterSchedule(root.tagSchedule, root.tags);
+    if (JSON.stringify(q) !== JSON.stringify(root.tagSchedule)) {
+      if (root.writeTagJson("tagSchedule", q))
+        root.tagSchedule = q;
+    }
     return true;
   }
 
@@ -367,7 +393,7 @@ Item {
     var next = Model.enqueueTag(root.tagSchedule, tag, root.tags);
     if (next === null)
       return false;
-    if (!root.writeFocusdJson("tagSchedule", next))
+    if (!root.writeTagJson("tagSchedule", next))
       return false;
     root.tagSchedule = next;
     return true;
@@ -377,7 +403,7 @@ Item {
     var next = Model.removeScheduledTag(root.tagSchedule, index);
     if (next === null)
       return false;
-    if (!root.writeFocusdJson("tagSchedule", next))
+    if (!root.writeTagJson("tagSchedule", next))
       return false;
     root.tagSchedule = next;
     return true;
@@ -387,7 +413,7 @@ Item {
     var next = Model.saveSchedulePreset(root.tagSchedulePresets, name, root.tagSchedule);
     if (next === null)
       return false;
-    if (!root.writeFocusdJson("tagSchedulePresets", next))
+    if (!root.writeTagJson("tagSchedulePresets", next))
       return false;
     root.tagSchedulePresets = next;
     return true;
@@ -397,7 +423,7 @@ Item {
     var next = Model.loadSchedulePreset(root.tagSchedulePresets, name);
     if (next === null)
       return false;
-    if (!root.writeFocusdJson("tagSchedule", next))
+    if (!root.writeTagJson("tagSchedule", next))
       return false;
     root.tagSchedule = next;
     return true;
@@ -407,17 +433,19 @@ Item {
     var next = Model.deleteSchedulePreset(root.tagSchedulePresets, name);
     if (next === null)
       return false;
-    if (!root.writeFocusdJson("tagSchedulePresets", next))
+    if (!root.writeTagJson("tagSchedulePresets", next))
       return false;
     root.tagSchedulePresets = next;
     return true;
   }
 
   // Open the log of completed blocks: the Obsidian Focus Log when the
-  // sync path is set, otherwise the sessions log itself.
+  // sync path is set, otherwise the sessions log itself. The path is
+  // URI-encoded: a space (as in "Focus Log.md") would otherwise break
+  // the file:// URL.
   function openLog() {
     var p = root.focusLogPath || root.sessionsPath;
-    Qt.openUrlExternally("file://" + p);
+    Qt.openUrlExternally(encodeURI("file://" + p));
   }
 
   Timer {
@@ -456,11 +484,11 @@ Item {
     var next = ok ? String(raw || "") : "";
     if (root.pendingPresetOp !== "" || root.pendingWrite) {
       // A preset switch / Save As and/or a slider release is waiting on
-      // this fresh read. Apply the preset op first, then the duration
-      // write, on top of the fresh text — the other sliders may hold
-      // stale values, so only the released key is ever passed in. If
-      // the read failed, write nothing; the next poll snaps the panel
-      // back. A write that changes nothing is skipped.
+      // this fresh read. Apply the slider first, then the preset op, on
+      // top of the fresh text — the other sliders may hold stale values,
+      // so only the released key is ever passed in. If the read failed,
+      // write nothing; the next poll snaps the panel back. A write that
+      // changes nothing is skipped.
       var op = root.pendingPresetOp;
       var arg = root.pendingPresetArg;
       var kind = root.pendingWriteKind;
@@ -471,16 +499,24 @@ Item {
       root.pendingWriteKind = "";
       if (ok) {
         var updated = next;
-        if (op === "setPreset")
-          updated = Model.setActivePreset(updated, arg);
-        else if (op === "savePreset")
-          updated = Model.savePresetAs(updated, arg, root.workMinutes, root.shortBreakMinutes, root.longBreakMinutes);
-        if (updated === null)
-          updated = next;
+        // The slider's value belongs to the preset that was active when
+        // it was released, so apply it first: switching the preset
+        // first would write the old preset's value into the new
+        // preset's section. A failed op keeps the changes that did
+        // land, rather than resetting to the fresh text.
         if (kind) {
           var dur = Model.updateDuration(updated, kind, value);
           if (dur !== null)
             updated = dur;
+        }
+        if (op === "setPreset") {
+          var preset = Model.setActivePreset(updated, arg);
+          if (preset !== null)
+            updated = preset;
+        } else if (op === "savePreset") {
+          var saved = Model.savePresetAs(updated, arg, root.workMinutes, root.shortBreakMinutes, root.longBreakMinutes);
+          if (saved !== null)
+            updated = saved;
         }
         if (updated !== next) {
           root.durationsRaw = updated;
@@ -506,14 +542,6 @@ Item {
     root.longBreakMinutes = parsed.longBreak;
   }
 
-  // A slider release re-reads config.toml fresh, then writes only the
-  // released slider's key on top of that fresh text (in applyDurations).
-  // The cached text can be up to 10s old, so writing from it could
-  // overwrite a change made in the focusd TUI in that window — and the
-  // other sliders still hold their (now stale) values, so only the
-  // released key is ever passed in. The 10s poll re-reads the file and
-  // confirms the write; if it failed, the sliders snap back to the
-  // file's values.
   // Switch the active preset (from the panel menu). Re-reads
   // config.toml fresh, then writes the new active_preset on top of that
   // fresh text (in applyDurations) — the cached text can be up to 10s
@@ -540,6 +568,15 @@ Item {
     root.loadDurations();
   }
 
+  // A slider release re-reads config.toml fresh, then writes only the
+  // released slider's key on top of that fresh text (in applyDurations).
+  // The cached text can be up to 10s old, so writing from it could
+  // overwrite a change made in the focusd TUI in that window — and the
+  // other sliders still hold their (now stale) values, so only the
+  // released key is ever passed in. The 10s poll re-reads the file and
+  // confirms the write; if it failed, the sliders snap back to the
+  // file's values. The in-memory slider value is updated immediately so
+  // a Save As in the same poll sees it.
   function writeDurations(kind, value) {
     var v = Math.round(Number(value));
     if (kind === "work") root.workMinutes = v;
@@ -957,12 +994,17 @@ Item {
       }
       // Tag schedule: the block that just ended was tagged with the
       // current tag, so take the next scheduled tag for the block after
-      // it. An empty queue leaves the current tag alone.
-      var shifted = Model.shiftSchedule(root.tagSchedule);
-      if (shifted && root.tags.indexOf(shifted.tag) !== -1) {
+      // it. An empty queue leaves the current tag alone. The shift
+      // skips tags that are no longer categories; a queue holding only
+      // such tags is drained so it cannot jam the next block end.
+      var shifted = Model.shiftSchedule(root.tagSchedule, root.tags);
+      if (shifted) {
         root.tagSchedule = shifted.schedule;
         root.currentTag = shifted.tag;
-        root.writeFocusdJson("tagSchedule", shifted.schedule);
+        root.writeTagJson("tagSchedule", shifted.schedule);
+      } else if (root.tagSchedule.length) {
+        root.tagSchedule = [];
+        root.writeTagJson("tagSchedule", []);
       }
       if (Model.shouldStopAfterRound(root.rounds, root.roundsCompleted)) {
         runEnded = true;
