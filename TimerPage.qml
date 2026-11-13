@@ -362,21 +362,13 @@ Item {
           width: parent.width
           spacing: Style.space(8)
 
-          TextField {
-            id: presetNameField
+          Text {
             Layout.fillWidth: true
-            placeholderText: "New preset name"
-            foreground: root.foreground
-            accent: root.activeColor
-            fontFamily: root.fontFamily
+            text: "Save as (field removed for bisect)"
+            color: root.foreground
+            opacity: 0.5
+            font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
-            onAccepted: {
-              if (root.timerService && text.trim() !== "") {
-                root.timerService.savePresetAs(text.trim());
-                text = "";
-                root.saveAsOpen = false;
-              }
-            }
           }
 
           Button {
@@ -528,20 +520,13 @@ Item {
         width: parent.width
         spacing: Style.space(8)
 
-        TextField {
-          id: newTagField
+        Text {
           Layout.fillWidth: true
-          placeholderText: "New tag"
-          foreground: root.foreground
-          accent: root.activeColor
-          fontFamily: root.fontFamily
+          text: "New tag (field removed for bisect)"
+          color: root.foreground
+          opacity: 0.5
+          font.family: root.fontFamily
           font.pixelSize: Style.font.bodySmall
-          onAccepted: {
-            if (root.timerService && text.trim() !== "") {
-              root.timerService.addTag(text.trim());
-              text = "";
-            }
-          }
         }
 
         Button {
@@ -550,12 +535,7 @@ Item {
           accent: root.activeColor
           fontFamily: root.fontFamily
           fontSize: Style.font.bodySmall
-          onClicked: {
-            if (root.timerService && newTagField.text.trim() !== "") {
-              root.timerService.addTag(newTagField.text.trim());
-              newTagField.text = "";
-            }
-          }
+          onClicked: {}
         }
       }
 
@@ -684,22 +664,13 @@ Item {
         width: parent.width
         spacing: Style.space(8)
 
-        TextField {
-          id: scheduleNameField
+        Text {
           Layout.fillWidth: true
-          placeholderText: "Schedule preset name"
-          foreground: root.foreground
-          accent: root.activeColor
-          fontFamily: root.fontFamily
+          text: "Schedule name (field removed for bisect)"
+          color: root.foreground
+          opacity: 0.5
+          font.family: root.fontFamily
           font.pixelSize: Style.font.bodySmall
-          onAccepted: {
-            if (root.timerService && text.trim() !== "") {
-              if (root.timerService.saveSchedulePreset(text.trim()))
-                root.schedulePresetName = text.trim();
-              text = "";
-              root.saveScheduleOpen = false;
-            }
-          }
         }
 
         Button {
@@ -708,14 +679,7 @@ Item {
           accent: root.activeColor
           fontFamily: root.fontFamily
           fontSize: Style.font.bodySmall
-          onClicked: {
-            if (root.timerService && scheduleNameField.text.trim() !== "") {
-              if (root.timerService.saveSchedulePreset(scheduleNameField.text.trim()))
-                root.schedulePresetName = scheduleNameField.text.trim();
-              scheduleNameField.text = "";
-              root.saveScheduleOpen = false;
-            }
-          }
+          onClicked: root.saveScheduleOpen = false
         }
       }
 
