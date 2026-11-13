@@ -45,11 +45,12 @@ Item {
     contentWidth: width
     contentHeight: contentColumn.implicitHeight
 
-    // The panel's key catcher swallows wheel events before the
-    // Flickable's own handler sees them, so scroll explicitly: a wheel
-    // step moves the content, clamped to the scrollable range. A wheel
-    // step down (negative angleDelta.y) moves the content up, revealing
-    // the schedule area and View log below the fold.
+    // Wheel events were not reaching the Flickable's built-in handler on
+    // this surface (drag scrolled, the wheel did not), so scroll
+    // explicitly: a wheel step moves the content, clamped to the
+    // scrollable range. A wheel step down (negative angleDelta.y) moves
+    // the content up, revealing the schedule area and View log below
+    // the fold.
     WheelHandler {
       onWheel: function (event) {
         var maxY = Math.max(0, scroller.contentHeight - scroller.height);
