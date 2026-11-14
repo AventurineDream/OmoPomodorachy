@@ -58,6 +58,9 @@ Item {
   // Whether the Durations section in the panel is expanded. Persisted
   // in focusd.json so the choice sticks across shell restarts.
   property bool durationsExpanded: true
+  // Whether the "Tag this block" section in the panel is expanded.
+  // Persisted in focusd.json, same as durationsExpanded.
+  property bool tagsExpanded: true
   // A slider release is waiting on a fresh re-read of the TOML. The
   // cached text can be up to 10s old, and a change made in the focusd
   // TUI inside that window would be overwritten if the write used it.
@@ -212,6 +215,9 @@ Item {
     // Durations section collapsed or expanded. Defaults to expanded.
     var de = root.fileConfig && root.fileConfig.durationsExpanded;
     root.durationsExpanded = (de === undefined || de === null) ? true : !!de;
+    // "Tag this block" section collapsed or expanded. Defaults to expanded.
+    var te = root.fileConfig && root.fileConfig.tagsExpanded;
+    root.tagsExpanded = (te === undefined || te === null) ? true : !!te;
     // Obsidian sync (Phase 6): where the generated Focus Log goes. Off
     // by default — an empty focusLogPath until Aven okays direct vault
     // writes; a path in focusd.json turns it on (must be absolute).
@@ -350,6 +356,13 @@ Item {
   function setDurationsExpanded(expanded) {
     root.durationsExpanded = !!expanded;
     root.writeFocusdJson("durationsExpanded", root.durationsExpanded);
+  }
+
+  // Whether the "Tag this block" section is expanded. Persisted so
+  // the choice sticks across shell restarts.
+  function setTagsExpanded(expanded) {
+    root.tagsExpanded = !!expanded;
+    root.writeFocusdJson("tagsExpanded", root.tagsExpanded);
   }
 
   // Write a tag/schedule key to focusd.json, recording a refusal so

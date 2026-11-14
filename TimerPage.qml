@@ -391,7 +391,10 @@ Item {
           }
 
           Dropdown {
-            width: Style.spacing.dropdownWidth
+            // Flexes between the label and the Save as… button: a fixed
+            // 240px width overflowed the 390px panel and clipped the
+            // button off-screen.
+            Layout.fillWidth: true
             label: ""
             showLabel: false
             value: root.timerService ? root.timerService.activePreset : "pomodoro"
@@ -540,127 +543,34 @@ Item {
         color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
       }
 
-      Text {
-        text: "Tag this block"
-        color: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.bodySmall
-      }
-
-      Flow {
-        width: parent.width
-        spacing: Style.space(8)
-
-        Repeater {
-          model: root.timerService ? root.timerService.tags : []
-
-          Row {
-            required property string modelData
-            spacing: Style.space(2)
-
-            Button {
-              text: modelData
-              foreground: root.foreground
-              accent: root.activeColor
-              fontFamily: root.fontFamily
-              fontSize: Style.font.bodySmall
-              // The selected tag reads as the active one.
-              opacity: root.timerService && root.timerService.currentTag === modelData ? 1 : 0.55
-              onClicked: if (root.timerService)
-                root.timerService.setCurrentTag(modelData)
-            }
-
-            Button {
-              text: "×"
-              tooltipText: "Delete tag " + modelData
-              foreground: root.foreground
-              accent: root.activeColor
-              fontFamily: root.fontFamily
-              fontSize: Style.font.bodySmall
-              opacity: 0.6
-              onClicked: if (root.timerService)
-                root.timerService.removeTag(modelData)
-            }
-          }
-        }
-      }
-
       RowLayout {
         width: parent.width
         spacing: Style.space(8)
 
-        TextField {
-          id: newTagField
-          Layout.preferredWidth: Style.space(180)
-          placeholderText: "New tag"
-          foreground: root.foreground
-          accent: root.activeColor
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.bodySmall
-          onAccepted: {
-            if (root.timerService && text.trim() !== "") {
-              root.timerService.addTag(text.trim());
-              text = "";
-            }
-            root.editorDone();
-          }
-          Keys.onEscapePressed: root.editorDone()
-        }
-
         Button {
-          text: "Add tag"
-          foreground: root.foreground
-          accent: root.activeColor
-          fontFamily: root.fontFamily
-          fontSize: Style.font.bodySmall
-          onClicked: {
-            if (root.timerService && newTagField.text.trim() !== "") {
-              root.timerService.addTag(newTagField.text.trim());
-              newTagField.text = "";
-            }
-            root.editorDone();
-          }
-        }
-      }
-
-      // Shown when a tag or schedule write was refused (the config
-      // read failed, so the write was held back rather than risking the
-      // file). It clears on the next successful write.
-      Text {
-        visible: root.timerService ? root.timerService.tagWriteRefused : false
-        width: parent.width
-        text: "Couldn't save tags just now — the config isn't ready. Try again in a moment."
-        color: Color.urgent
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.bodySmall
-        wrapMode: Text.WordWrap
-      }
-
-      Row {
-        visible: root.timerService ? !!root.timerService.lastWorkSession : false
-        width: parent.width
-        spacing: Style.space(8)
-
-        Text {
-          text: "Last:"
-          color: root.foreground
-          opacity: 0.6
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.bodySmall
-        }
-
-        Button {
-          text: root.timerService && root.timerService.lastWorkSession ? root.timerService.lastWorkSession.tag : ""
+          text: root.timerService && root.timerService.tagsExpanded ? "▾" : "▸"
           foreground: root.foreground
           accent: root.activeColor
           fontFamily: root.fontFamily
           fontSize: Style.font.bodySmall
           onClicked: if (root.timerService)
-            root.timerService.cycleLastTag()
+            root.timerService.setTagsExpanded(!root.timerService.tagsExpanded)
         }
 
         Text {
-          text: root.timerService && root.timerService.lastWorkSession ? ("· " + root.timerService.lastWorkSession.minutes + " min · " + root.timerService.lastWorkSession.date) : ""
+          text: "Tag this block"
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+
+        Item {
+          Layout.fillWidth: true
+          implicitHeight: 1
+        }
+
+        Text {
+          text: root.timerService ? root.timerService.currentTag : ""
           color: root.foreground
           opacity: 0.6
           font.family: root.fontFamily
@@ -668,162 +578,311 @@ Item {
         }
       }
 
-      Text {
-        text: "Up next"
-        color: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.bodySmall
-      }
-
-      Flow {
+      Column {
+        visible: root.timerService ? root.timerService.tagsExpanded : true
         width: parent.width
-        spacing: Style.space(8)
+        spacing: Style.space(10)
 
-        Repeater {
-          model: root.timerService ? root.timerService.tagSchedule : []
+        Flow {
+          width: parent.width
+          spacing: Style.space(8)
 
-          Row {
-            required property int index
-            required property string modelData
-            spacing: Style.space(2)
+          Repeater {
+            model: root.timerService ? root.timerService.tags : []
 
-            Button {
-              text: modelData
-              foreground: root.foreground
-              accent: root.activeColor
-              fontFamily: root.fontFamily
-              fontSize: Style.font.bodySmall
-              enabled: false
-              opacity: 0.8
-            }
+            Row {
+              required property string modelData
+              spacing: Style.space(2)
 
-            Button {
-              text: "×"
-              tooltipText: "Remove from schedule"
-              foreground: root.foreground
-              accent: root.activeColor
-              fontFamily: root.fontFamily
-              fontSize: Style.font.bodySmall
-              opacity: 0.6
-              onClicked: if (root.timerService)
-                root.timerService.removeScheduledTag(index)
+              Button {
+                text: modelData
+                foreground: root.foreground
+                accent: root.activeColor
+                fontFamily: root.fontFamily
+                fontSize: Style.font.bodySmall
+                // The selected tag reads as the active one.
+                opacity: root.timerService && root.timerService.currentTag === modelData ? 1 : 0.55
+                onClicked: if (root.timerService)
+                  root.timerService.setCurrentTag(modelData)
+              }
+
+              Button {
+                text: "×"
+                tooltipText: "Delete tag " + modelData
+                foreground: root.foreground
+                accent: root.activeColor
+                fontFamily: root.fontFamily
+                fontSize: Style.font.bodySmall
+                opacity: 0.6
+                onClicked: if (root.timerService)
+                  root.timerService.removeTag(modelData)
+              }
             }
           }
         }
-      }
 
-      Text {
-        visible: root.timerService ? root.timerService.tagSchedule.length === 0 : true
-        text: "Nothing scheduled — the next block keeps the tag above."
-        color: root.foreground
-        opacity: 0.5
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.bodySmall
-        wrapMode: Text.Wrap
-        width: parent.width
-      }
+        RowLayout {
+          width: parent.width
+          spacing: Style.space(8)
 
-      RowLayout {
-        width: parent.width
-        spacing: Style.space(8)
+          TextField {
+            id: newTagField
+            Layout.preferredWidth: Style.space(180)
+            placeholderText: "New tag"
+            foreground: root.foreground
+            accent: root.activeColor
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            onAccepted: {
+              if (root.timerService && text.trim() !== "") {
+                root.timerService.addTag(text.trim());
+                text = "";
+              }
+              root.editorDone();
+            }
+            Keys.onEscapePressed: root.editorDone()
+          }
+
+          Button {
+            text: "Add tag"
+            foreground: root.foreground
+            accent: root.activeColor
+            fontFamily: root.fontFamily
+            fontSize: Style.font.bodySmall
+            onClicked: {
+              if (root.timerService && newTagField.text.trim() !== "") {
+                root.timerService.addTag(newTagField.text.trim());
+                newTagField.text = "";
+              }
+              root.editorDone();
+            }
+          }
+        }
+
+        // Shown when a tag or schedule write was refused (the config
+        // read failed, so the write was held back rather than risking the
+        // file). It clears on the next successful write.
+        Text {
+          visible: root.timerService ? root.timerService.tagWriteRefused : false
+          width: parent.width
+          text: "Couldn't save tags just now — the config isn't ready. Try again in a moment."
+          color: Color.urgent
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+          wrapMode: Text.WordWrap
+        }
+
+        Row {
+          visible: root.timerService ? !!root.timerService.lastWorkSession : false
+          width: parent.width
+          spacing: Style.space(8)
+
+          Text {
+            text: "Last:"
+            color: root.foreground
+            opacity: 0.6
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          Button {
+            text: root.timerService && root.timerService.lastWorkSession ? root.timerService.lastWorkSession.tag : ""
+            foreground: root.foreground
+            accent: root.activeColor
+            fontFamily: root.fontFamily
+            fontSize: Style.font.bodySmall
+            onClicked: if (root.timerService)
+              root.timerService.cycleLastTag()
+          }
+
+          Text {
+            text: root.timerService && root.timerService.lastWorkSession ? ("· " + root.timerService.lastWorkSession.minutes + " min · " + root.timerService.lastWorkSession.date) : ""
+            color: root.foreground
+            opacity: 0.6
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+        }
+
+        Text {
+          text: "Up next"
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+
+        Flow {
+          width: parent.width
+          spacing: Style.space(8)
+
+          Repeater {
+            model: root.timerService ? root.timerService.tagSchedule : []
+
+            Row {
+              required property int index
+              required property string modelData
+              spacing: Style.space(2)
+
+              Button {
+                text: modelData
+                foreground: root.foreground
+                accent: root.activeColor
+                fontFamily: root.fontFamily
+                fontSize: Style.font.bodySmall
+                enabled: false
+                opacity: 0.8
+              }
+
+              Button {
+                text: "×"
+                tooltipText: "Remove from schedule"
+                foreground: root.foreground
+                accent: root.activeColor
+                fontFamily: root.fontFamily
+                fontSize: Style.font.bodySmall
+                opacity: 0.6
+                onClicked: if (root.timerService)
+                  root.timerService.removeScheduledTag(index)
+              }
+            }
+          }
+        }
+
+        Text {
+          visible: root.timerService ? root.timerService.tagSchedule.length === 0 : true
+          text: "Nothing scheduled — the next block keeps the tag above."
+          color: root.foreground
+          opacity: 0.5
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+          wrapMode: Text.Wrap
+          width: parent.width
+        }
+
+        RowLayout {
+          width: parent.width
+          spacing: Style.space(8)
+
+          Button {
+            text: "Queue current tag"
+            foreground: root.foreground
+            accent: root.activeColor
+            fontFamily: root.fontFamily
+            fontSize: Style.font.bodySmall
+            onClicked: if (root.timerService)
+              root.timerService.enqueueTag(root.timerService.currentTag)
+          }
+
+          Dropdown {
+            // Flexes between the Queue and Save buttons: a fixed 240px
+            // width overflowed the 390px panel and clipped the Save
+            // schedule… button entirely off-screen.
+            Layout.fillWidth: true
+            // Labelled so the box reads as a preset picker even when no
+            // preset is saved yet (otherwise it is a blank box that looks
+            // like a text input).
+            label: "Schedule preset"
+            showLabel: true
+            value: root.schedulePresetName
+            options: root.timerService ? Object.keys(root.timerService.tagSchedulePresets) : []
+            foreground: root.foreground
+            accent: root.activeColor
+            fontFamily: root.fontFamily
+            onChanged: function (v) {
+              if (root.timerService && root.timerService.loadSchedulePreset(v))
+                root.schedulePresetName = v;
+            }
+          }
+
+          Button {
+            // Delete the loaded schedule preset. Only shown when one is
+            // loaded — saving refuses a duplicate name, so without this
+            // there would be no way to replace a preset.
+            visible: root.schedulePresetName !== ""
+            text: "×"
+            tooltipText: "Delete schedule preset " + root.schedulePresetName
+            foreground: root.foreground
+            accent: root.activeColor
+            fontFamily: root.fontFamily
+            fontSize: Style.font.bodySmall
+            opacity: 0.6
+            onClicked: if (root.timerService && root.timerService.deleteSchedulePreset(root.schedulePresetName))
+              root.schedulePresetName = "";
+          }
+
+          Button {
+            text: "Save schedule…"
+            foreground: root.foreground
+            accent: root.activeColor
+            fontFamily: root.fontFamily
+            fontSize: Style.font.bodySmall
+            onClicked: root.saveScheduleOpen = !root.saveScheduleOpen
+          }
+        }
+
+        RowLayout {
+          visible: root.saveScheduleOpen
+          width: parent.width
+          spacing: Style.space(8)
+
+          TextField {
+            id: scheduleNameField
+            Layout.preferredWidth: Style.space(180)
+            placeholderText: "Schedule preset name"
+            foreground: root.foreground
+            accent: root.activeColor
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            onAccepted: {
+              if (root.timerService && text.trim() !== "") {
+                if (root.timerService.saveSchedulePreset(text.trim()))
+                  root.schedulePresetName = text.trim();
+                text = "";
+                root.saveScheduleOpen = false;
+              }
+              root.editorDone();
+            }
+            Keys.onEscapePressed: root.editorDone()
+          }
+
+          Button {
+            text: "Save"
+            foreground: root.foreground
+            accent: root.activeColor
+            fontFamily: root.fontFamily
+            fontSize: Style.font.bodySmall
+            onClicked: {
+              if (root.timerService && scheduleNameField.text.trim() !== "") {
+                if (root.timerService.saveSchedulePreset(scheduleNameField.text.trim()))
+                  root.schedulePresetName = scheduleNameField.text.trim();
+                scheduleNameField.text = "";
+                root.saveScheduleOpen = false;
+              }
+              root.editorDone();
+            }
+          }
+        }
 
         Button {
-          text: "Queue current tag"
+          text: "View log"
           foreground: root.foreground
           accent: root.activeColor
           fontFamily: root.fontFamily
           fontSize: Style.font.bodySmall
           onClicked: if (root.timerService)
-            root.timerService.enqueueTag(root.timerService.currentTag)
+            root.timerService.openLog()
         }
 
-        Dropdown {
-          width: Style.spacing.dropdownWidth
-          label: ""
-          showLabel: false
-          value: root.schedulePresetName
-          options: root.timerService ? Object.keys(root.timerService.tagSchedulePresets) : []
-          foreground: root.foreground
-          accent: root.activeColor
-          fontFamily: root.fontFamily
-          onChanged: function (v) {
-            if (root.timerService && root.timerService.loadSchedulePreset(v))
-              root.schedulePresetName = v;
-          }
-        }
-
-        Button {
-          text: "Save schedule…"
-          foreground: root.foreground
-          accent: root.activeColor
-          fontFamily: root.fontFamily
-          fontSize: Style.font.bodySmall
-          onClicked: root.saveScheduleOpen = !root.saveScheduleOpen
-        }
-      }
-
-      RowLayout {
-        visible: root.saveScheduleOpen
-        width: parent.width
-        spacing: Style.space(8)
-
-        TextField {
-          id: scheduleNameField
-          Layout.preferredWidth: Style.space(180)
-          placeholderText: "Schedule preset name"
-          foreground: root.foreground
-          accent: root.activeColor
+        Text {
+          text: "Tags the next work block. Tap Last to fix the one that just ended. Queued tags apply to the blocks after it, in order."
+          color: root.foreground
+          opacity: 0.5
           font.family: root.fontFamily
           font.pixelSize: Style.font.bodySmall
-          onAccepted: {
-            if (root.timerService && text.trim() !== "") {
-              if (root.timerService.saveSchedulePreset(text.trim()))
-                root.schedulePresetName = text.trim();
-              text = "";
-              root.saveScheduleOpen = false;
-            }
-            root.editorDone();
-          }
-          Keys.onEscapePressed: root.editorDone()
+          wrapMode: Text.Wrap
+          // Leave room for the info button in the panel's bottom-right corner.
+          width: parent.width - Style.space(36)
         }
-
-        Button {
-          text: "Save"
-          foreground: root.foreground
-          accent: root.activeColor
-          fontFamily: root.fontFamily
-          fontSize: Style.font.bodySmall
-          onClicked: {
-            if (root.timerService && scheduleNameField.text.trim() !== "") {
-              if (root.timerService.saveSchedulePreset(scheduleNameField.text.trim()))
-                root.schedulePresetName = scheduleNameField.text.trim();
-              scheduleNameField.text = "";
-              root.saveScheduleOpen = false;
-            }
-            root.editorDone();
-          }
-        }
-      }
-
-      Button {
-        text: "View log"
-        foreground: root.foreground
-        accent: root.activeColor
-        fontFamily: root.fontFamily
-        fontSize: Style.font.bodySmall
-        onClicked: if (root.timerService)
-          root.timerService.openLog()
-      }
-
-      Text {
-        text: "Tags the next work block. Tap Last to fix the one that just ended. Queued tags apply to the blocks after it, in order."
-        color: root.foreground
-        opacity: 0.5
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.bodySmall
-        wrapMode: Text.Wrap
-        // Leave room for the info button in the panel's bottom-right corner.
-        width: parent.width - Style.space(36)
       }
     }
   }
