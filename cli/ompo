@@ -1,0 +1,307 @@
+#!/usr/bin/env bash
+# ompo — check and control the OmaPomodorchy focus timer from the terminal.
+#
+# Install: copy this file into a directory on your PATH (for example
+# ~/.local/bin) and make it executable:
+#
+#   cp cli/ompo ~/.local/bin/
+#   chmod +x ~/.local/bin/ompo
+#
+# Then type `ompo` and press Enter to see the timer. Handy over SSH,
+# where the bar widget and panel are on the machine's own displays and
+# you cannot see them from the phone — the same use case as `tb` for
+# Terminal-Breather. The status display is plain text, so it reads fine
+# on a phone terminal.
+#
+# Usage: ompo [command]
+#   ompo                show the current timer status (read-only)
+#   ompo status         same as bare `ompo`
+#   ompo start [session]
+#                       start the timer: resumes it when it is paused,
+#                       otherwise starts a fresh session — the current
+#                       one, or work / short-break / long-break. A named
+#                       session always starts fresh, even when paused.
+#   ompo pause          pause the running session
+#   ompo resume         resume the paused session
+#   ompo --help         show this help
+#
+# Examples:
+#   ompo                # Work · paused — 24:13 left, cycle 2/4
+#   ompo start          # resume the paused session, or start the current one
+#   ompo start work     # start a fresh work session
+#   ompo pause          # pause it again
+#
+# How start/pause/resume map onto focusd (0.2.14): `focusd pause` and
+# `focusd resume` are the explicit subcommands (the panel's pause button
+# uses `focusd toggle`); a fresh start is `focusd -s [session]`, with an
+# empty session meaning "the current one". `focusd start` is NOT a
+# subcommand — it errors out — so this script never calls it.
+#
+# Tests use two environment overrides (not for daily use):
+#   OMPO_FOCUSD   path to the focusd binary (a test stub on PATH)
+#   OMPO_DRY_RUN=1  print the focusd command that would run, without
+#                   running it — so the control paths can be checked
+#                   without touching a live timer.
+#
+# Status is parsed with python3 (already required by this repo's duration
+# sliders), so no jq dependency.
+
+set -euo pipefail
+
+FOCUSD="${OMPO_FOCUSD:-focusd}"
+
+usage() {
+  cat <<'EOF'
+ompo — check and control the OmaPomodorchy focus timer from the terminal.
+
+Usage: ompo [command]
+  ompo                show the current timer status (read-only)
+  ompo status         same as bare `ompo`
+  ompo start [session]
+                      start the timer: resumes it when it is paused,
+                      otherwise starts a fresh session — the current
+                      one, or work / short-break / long-break. A named
+                      session always starts fresh, even when paused.
+  ompo pause          pause the running session
+  ompo resume         resume the paused session
+  ompo --help         show this help
+
+Examples:
+  ompo                # Work · paused — 24:13 left, cycle 2/4
+  ompo start          # resume the paused session, or start the current one
+  ompo start work     # start a fresh work session
+  ompo pause          # pause it again
+EOF
+}
+
+# The raw `focusd status` JSON on stdout; dies with a clear message when
+# focusd is missing or the status call fails (e.g. the daemon is down).
+focusd_status_json() {
+  if ! command -v "$FOCUSD" >/dev/null 2>&1; then
+    echo "ompo: focusd not found — install it first (yay -S focusd, or open the OmaPomodorchy panel and tap Install)." >&2
+    return 1
+  fi
+  local out
+  if ! out="$("$FOCUSD" status 2>/dev/null)"; then
+    echo "ompo: 'focusd status' failed — is the focusd daemon running? (try: focusd -d)" >&2
+    return 1
+  fi
+  printf '%s' "$out"
+}
+
+# Print the phone-readable status lines from `focusd status` JSON on
+# stdin. Exits 1 (with a message) when the JSON is not a status object.
+show_status() {
+  python3 -c '
+import json, re, sys
+try:
+    st = json.load(sys.stdin)
+except Exception:
+    print("ompo: could not read the timer status (unexpected output from focusd).", file=sys.stderr)
+    sys.exit(1)
+if not isinstance(st, dict) or "text" not in st:
+    print("ompo: could not read the timer status (unexpected output from focusd).", file=sys.stderr)
+    sys.exit(1)
+classes = st.get("class") or []
+state = "paused" if "paused" in classes else "running"
+session = str(st.get("session") or "").strip()
+text = str(st.get("text") or "").strip()
+if not session or not text:
+    print("No session running.")
+    print("Start one with: ompo start")
+    sys.exit(0)
+pct = st.get("percentage")
+pct_s = " · %s%% elapsed" % pct if isinstance(pct, (int, float)) else ""
+print("%s · %s" % (session, state))
+print("%s left%s" % (text, pct_s))
+tooltip = str(st.get("tooltip") or "")
+cycle = re.search(r"Cycle (\d+/\d+)", tooltip)
+nxt = re.search(r"Next Session: ([^\n,]+)", tooltip)
+bits = []
+if cycle:
+    bits.append("Cycle %s" % cycle.group(1))
+if nxt:
+    bits.append("Next: %s" % nxt.group(1).strip())
+if bits:
+    print(" · ".join(bits))
+focused = st.get("focused_today")
+sessions = st.get("sessions_today")
+streak = st.get("current_streak")
+tail = []
+if focused is not None:
+    tail.append("Focused today: %s" % focused)
+if sessions is not None:
+    tail.append("Sessions: %s" % sessions)
+if streak is not None:
+    tail.append("Streak: %s day%s" % (streak, "" if streak == 1 else "s"))
+if tail:
+    print(" · ".join(tail))
+'
+}
+
+# "running" / "paused" / "stopped" for the current timer, from the same
+# JSON. Dies (exit 1) when the status cannot be read. focusd reports a
+# running session by the ABSENCE of "paused" in class (mirroring
+# Service.qml: paused when "paused" is present, running otherwise) —
+# there is no "running" class element. An empty session/text means no
+# session; a failed status call means the daemon is down.
+timer_state() {
+  local json
+  json="$(focusd_status_json)" || return 1
+  printf '%s' "$json" | python3 -c '
+import json, sys
+try:
+    st = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+if not isinstance(st, dict) or "text" not in st:
+    sys.exit(1)
+classes = st.get("class") or []
+if not str(st.get("session") or "").strip() or not str(st.get("text") or "").strip():
+    print("stopped")
+elif "paused" in classes:
+    print("paused")
+else:
+    print("running")
+'
+}
+
+# Run a focusd control command — or just print it in dry-run mode, so the
+# control paths can be verified without touching a live timer.
+run_focusd() {
+  if [ "${OMPO_DRY_RUN:-}" = "1" ]; then
+    echo "would run: focusd $*"
+    return 0
+  fi
+  "$FOCUSD" "$@"
+}
+
+cmd="${1:-status}"
+case "$cmd" in
+  --help|-h|help)
+    usage
+    exit 0
+    ;;
+  status|"")
+    if [ $# -gt 1 ]; then
+      echo "ompo: too many arguments — usage: ompo status" >&2
+      exit 2
+    fi
+    json="$(focusd_status_json)" || exit 1
+    printf '%s' "$json" | show_status
+    ;;
+  start)
+    session="${2:-}"
+    case "$session" in
+      ""|work|short-break|long-break) ;;
+      *)
+        echo "ompo: unknown session '$session' — use work, short-break, or long-break." >&2
+        usage >&2
+        exit 2
+        ;;
+    esac
+    if [ $# -gt 2 ]; then
+      echo "ompo: too many arguments — usage: ompo start [work | short-break | long-break]" >&2
+      exit 2
+    fi
+    state="$(timer_state)" || exit 1
+    case "$state" in
+      running)
+        if [ -n "$session" ]; then
+          # A named session is an explicit fresh start of that session,
+          # even when the timer is already running — the docs promise a
+          # named session always starts fresh.
+          run_focusd -s "$session"
+          if [ "${OMPO_DRY_RUN:-}" != "1" ]; then
+            json="$(focusd_status_json)" || exit 1
+            printf '%s' "$json" | show_status
+          fi
+        else
+          echo "Already running — nothing to start."
+          json="$(focusd_status_json)" || exit 1
+          printf '%s' "$json" | show_status
+        fi
+        ;;
+      paused)
+        # Bare `ompo start` resumes, keeping the paused session's
+        # remaining time — a fresh `focusd -s` would restart it from
+        # the full length (verified: `focusd -s` on a paused timer
+        # resets it to 25:00). A NAMED session is an explicit fresh
+        # start of that session, so it does use `focusd -s`.
+        if [ -n "$session" ]; then
+          run_focusd -s "$session"
+        else
+          run_focusd resume
+        fi
+        if [ "${OMPO_DRY_RUN:-}" != "1" ]; then
+          json="$(focusd_status_json)" || exit 1
+          printf '%s' "$json" | show_status
+        fi
+        ;;
+      stopped)
+        if [ -n "$session" ]; then
+          run_focusd -s "$session"
+        else
+          run_focusd -s
+        fi
+        if [ "${OMPO_DRY_RUN:-}" != "1" ]; then
+          json="$(focusd_status_json)" || exit 1
+          printf '%s' "$json" | show_status
+        fi
+        ;;
+    esac
+    ;;
+  pause)
+    if [ $# -gt 1 ]; then
+      echo "ompo: too many arguments — usage: ompo pause" >&2
+      exit 2
+    fi
+    state="$(timer_state)" || exit 1
+    case "$state" in
+      running)
+        run_focusd pause
+        if [ "${OMPO_DRY_RUN:-}" != "1" ]; then
+          json="$(focusd_status_json)" || exit 1
+          printf '%s' "$json" | show_status
+        fi
+        ;;
+      paused)
+        echo "Already paused."
+        json="$(focusd_status_json)" || exit 1
+        printf '%s' "$json" | show_status
+        ;;
+      stopped)
+        echo "Nothing running to pause."
+        ;;
+    esac
+    ;;
+  resume)
+    if [ $# -gt 1 ]; then
+      echo "ompo: too many arguments — usage: ompo resume" >&2
+      exit 2
+    fi
+    state="$(timer_state)" || exit 1
+    case "$state" in
+      running)
+        echo "Already running."
+        json="$(focusd_status_json)" || exit 1
+        printf '%s' "$json" | show_status
+        ;;
+      paused)
+        run_focusd resume
+        if [ "${OMPO_DRY_RUN:-}" != "1" ]; then
+          json="$(focusd_status_json)" || exit 1
+          printf '%s' "$json" | show_status
+        fi
+        ;;
+      stopped)
+        echo "Nothing to resume — start a session with: ompo start"
+        ;;
+    esac
+    ;;
+  *)
+    echo "ompo: unknown command '$cmd'." >&2
+    usage >&2
+    exit 2
+    ;;
+esac
