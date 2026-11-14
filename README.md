@@ -46,7 +46,28 @@ Click the bar widget to open the control panel. Right-click skips to the next se
 o.bind("CTRL", "T", "exec, omarchy-shell shell summon bibek.focusd")
 ```
 
-Start the timer with `focusd start`. Press Escape in the info page to return to the timer page.
+Start the timer with `ompo start` (or `focusd -s` — `focusd start` is not a focusd subcommand). Press Escape in the info page to return to the timer page.
+
+### Terminal shortcut (`ompo`)
+
+A one-word launcher for the terminal — handy over SSH, where the bar widget and panel are on the machine's own displays and you cannot see them from the phone. Same idea as `tb` for Terminal-Breather. Install it once:
+
+```bash
+cp cli/ompo ~/.local/bin/
+chmod +x ~/.local/bin/ompo
+```
+
+Then type `ompo` and press Enter to see the timer — session, state, time left, cycle, next session, and today's focus — as plain text that reads fine on a phone terminal:
+
+```bash
+ompo                # Work · paused — 24:13 left, cycle 2/4
+ompo start          # resume the paused session, or start the current one
+ompo start work     # start a fresh work session
+ompo pause          # pause the running session
+ompo resume         # resume the paused session
+```
+
+`ompo start` resumes a paused session (so its remaining time is kept — a fresh `focusd -s` would restart it from the full length) and only starts a fresh session when nothing is running. A named session (`ompo start work`) always starts fresh, even when paused. `ompo pause` and `ompo resume` are no-ops with a message when there is nothing to pause or resume. Run the checks with `python3 test/ompo.test.py` — they run the script against a stub `focusd`, so they never touch a live timer.
 
 ## Configuration
 
