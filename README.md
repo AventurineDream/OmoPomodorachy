@@ -189,8 +189,10 @@ Here are my other Omarchy plugins:
 
 Please give a star if you find them useful!
 
-## Panel (1.10.0)
+## Panel (1.11.0)
 
+- **Tag section collapses (1.11.0).** "Tag this block" has a chevron, like Durations; collapse it to save space. The choice is remembered in `focusd.json` (`tagsExpanded`). The current tag still shows on the right when collapsed.
+- **Schedule row fits (1.11.0).** The "Queue current tag" row and the Durations Preset row no longer overflow the panel — their dropdowns flex to the space between the buttons, so the "Save schedule…" button is visible instead of clipped off-screen. The schedule-preset dropdown is labelled, so it reads as a preset picker even before any preset is saved.
 - **Session log export (1.10.0).** Set `focusLogPath` to any absolute path to export completed blocks there, regenerated whole on every block end or retag. A `.csv` path writes CSV (`Date,Tag,Minutes,Source`); anything else writes the Markdown table. Off by default; an existing file is only replaced when it starts with the generated header.
 - **Durations collapses.** The Durations section has a chevron; collapse it to save space. The choice is remembered in `focusd.json` (`durationsExpanded`). The page also scrolls (Flickable), so the schedule area and View log are reachable with Durations expanded.
 - **Wheel scrolling (1.9.1).** The mouse wheel scrolls the page — an explicit WheelHandler moves the Flickable's content (touchpad pixel deltas when present, else 48px per wheel notch). Root cause unknown: nothing in TimerPage or Panel blocks the built-in wheel handler, so if the built-in handling ever starts working, remove the WheelHandler or the page will scroll twice per step. Drag scrolling works too.
@@ -199,5 +201,5 @@ Please give a star if you find them useful!
 - **Save as.** Save the current slider values as a new preset (name it, no spaces) — it is created in `config.toml` and made active.
 - **Rounds hint.** "Rounds: 0 is off." is on its own line so the Durations section fits cleanly.
 - **Tags are editable.** Each tag has a × to delete it; a text field + Add tag creates one. Deleting the current tag falls back to the first tag. Deleting a tag also drops it from the queued schedule, so a deleted tag can never jam the queue — and the block-end advance skips any tag that is no longer a category.
-- **Tag schedule.** "Up next" queues tags for upcoming blocks, in order — when a block ends, the next queued tag becomes the current tag. Queue the current tag, remove queued tags with ×, save the queue as a named preset, and load a saved preset from the dropdown. If a tag or schedule write is refused (config not ready), the panel says so.
+- **Tag schedule.** "Up next" queues tags for upcoming blocks, in order — when a block ends, the next queued tag becomes the current tag. Queue the current tag, remove queued tags with ×, save the queue as a named preset, and load a saved preset from the dropdown. A loaded preset can be deleted with the × next to the dropdown (saving refuses a duplicate name, so delete is the way to replace a preset). If a tag or schedule write is refused (config not ready), the panel says so.
 - **View log.** Opens the log of completed blocks — the session export when a path is set (Markdown table or CSV, wherever you pointed it), otherwise the sessions log. The file path is URI-encoded, so a space (as in "Focus Log.md") opens correctly.
