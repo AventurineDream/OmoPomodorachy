@@ -166,6 +166,17 @@ rc, out, err, calls = stub.run("start")
 check("start on running is a no-op", rc == 0 and "Already running" in out)
 check("start on running invokes nothing but status",
       calls == ["status", "status"])
+rc, out, err, calls = stub.run("start", "short-break")
+check("start short-break on running starts fresh, not a no-op",
+      rc == 0 and "-s short-break" in calls)
+check("start short-break on running calls focusd -s",
+      calls[-3:] == ["status", "-s short-break", "status"])
+rc, out, err, calls = stub.run("start", "work",
+                               extra_env={"OMPO_DRY_RUN": "1"})
+check("dry-run start work on running prints a fresh start",
+      rc == 0 and "would run: focusd -s work" in out)
+check("dry-run start work on running executes nothing",
+      calls[-1:] == ["status"] and "-s work" not in calls)
 rc, out, err, calls = stub.run("pause")
 check("pause on running calls focusd pause", "pause" in calls)
 stub.close()

@@ -207,9 +207,20 @@ case "$cmd" in
     state="$(timer_state)" || exit 1
     case "$state" in
       running)
-        echo "Already running — nothing to start."
-        json="$(focusd_status_json)" || exit 1
-        printf '%s' "$json" | show_status
+        if [ -n "$session" ]; then
+          # A named session is an explicit fresh start of that session,
+          # even when the timer is already running — the docs promise a
+          # named session always starts fresh.
+          run_focusd -s "$session"
+          if [ "${OMPO_DRY_RUN:-}" != "1" ]; then
+            json="$(focusd_status_json)" || exit 1
+            printf '%s' "$json" | show_status
+          fi
+        else
+          echo "Already running — nothing to start."
+          json="$(focusd_status_json)" || exit 1
+          printf '%s' "$json" | show_status
+        fi
         ;;
       paused)
         # Bare `ompo start` resumes, keeping the paused session's
