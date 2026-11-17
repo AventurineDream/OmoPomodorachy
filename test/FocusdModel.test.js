@@ -6,7 +6,7 @@ const os = require("os");
 const { execFileSync } = require("child_process");
 const src = fs.readFileSync(path.join(__dirname, "..", "FocusdModel.js"), "utf8");
 const factory = new Function(
-  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, presetSection, updateDuration, listPresets, setActivePreset, validPresetName, savePresetAs, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, addTag, removeTag, enqueueTag, removeScheduledTag, filterSchedule, shiftSchedule, saveSchedulePreset, loadSchedulePreset, deleteSchedulePreset, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, setJsonKey, configTextOk, FOCUS_LOG_HEADER, FOCUS_LOG_CSV_HEADER, focusLogFormat, focusLogText, focusLogCsvText, focusLogCommand, FOCUS_LOG_GUARD_SKIP_EXIT, focusLogSkipMessage };"
+  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, parseOnByDefault, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, presetSection, updateDuration, listPresets, setActivePreset, validPresetName, savePresetAs, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, addTag, removeTag, enqueueTag, removeScheduledTag, filterSchedule, shiftSchedule, saveSchedulePreset, loadSchedulePreset, deleteSchedulePreset, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, setJsonKey, configTextOk, FOCUS_LOG_HEADER, FOCUS_LOG_CSV_HEADER, focusLogFormat, focusLogText, focusLogCsvText, focusLogCommand, FOCUS_LOG_GUARD_SKIP_EXIT, focusLogSkipMessage };"
 );
 const M = factory();
 
@@ -111,6 +111,13 @@ check("empty text is 0", M.parseMinutes("") === 0);
 check("non-time text is 0", M.parseMinutes("paused") === 0);
 check("00:00 is 0", M.parseMinutes("00:00") === 0);
 
+// --- parseOnByDefault (Breather toggles: on unless the config says off) ---
+check("missing or null toggle is on", M.parseOnByDefault(undefined) === true && M.parseOnByDefault(null) === true);
+check("explicit true stays on", M.parseOnByDefault(true) === true);
+check("explicit false is off", M.parseOnByDefault(false) === false);
+check("truthy values read as on", M.parseOnByDefault(1) === true && M.parseOnByDefault("yes") === true);
+check("falsy values read as off", M.parseOnByDefault(0) === false && M.parseOnByDefault("") === false);
+
 // --- shouldLaunchBreather (once per break, first running poll) ---
 check("running break, not launched: launch", M.shouldLaunchBreather("short-break", "running", "", "box", 5) === true);
 check("long break, not launched: launch", M.shouldLaunchBreather("long-break", "running", "", "478", 15) === true);
@@ -123,6 +130,12 @@ check("negative minutes: no launch", M.shouldLaunchBreather("short-break", "runn
 // After a work session the launch key clears, so the next break of the
 // same kind launches again.
 check("next short break after work: launch", M.shouldLaunchBreather("short-break", "running", "", "box", 5) === true);
+// Breather toggles: either one off means no launch, and omitting them
+// (the old 5-arg calls above) keeps the old behaviour.
+check("link off: no launch", M.shouldLaunchBreather("short-break", "running", "", "box", 5, false, true) === false);
+check("auto-launch off: no launch", M.shouldLaunchBreather("short-break", "running", "", "box", 5, true, false) === false);
+check("both toggles off: no launch", M.shouldLaunchBreather("short-break", "running", "", "box", 5, false, false) === false);
+check("both toggles on: launch", M.shouldLaunchBreather("short-break", "running", "", "box", 5, true, true) === true);
 
 // --- Durations (TOML parse / update) ---
 const SAMPLE_TOML = [

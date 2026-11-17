@@ -411,14 +411,31 @@ function shouldStopAfterRound(rounds, roundsCompleted) {
   return rounds > 0 && roundsCompleted >= rounds
 }
 
+// A GUI toggle that is on unless the config turns it off: a missing or
+// null value is on (the existing behaviour), an explicit false is off,
+// anything else is read as a boolean. The Breather link and auto-launch
+// toggles both use it, so a focusd.json written before they existed
+// keeps the link on.
+function parseOnByDefault(value) {
+  if (value === undefined || value === null) return true
+  return !!value
+}
+
 // Launch the Breather once per break, on the first poll where the break is
 // running. launchedFor is the session key the Breather already launched for
 // ("" if none this break). A break that starts paused does not launch until
 // the user resumes it, and pause/resume mid-break does not relaunch. minutes
 // is the break's remaining time in whole minutes; 0 means unknown, so no
-// launch. An empty breakPattern turns the link off.
-function shouldLaunchBreather(sessionKey, status, launchedFor, breakPattern, minutes) {
+// launch. An empty breakPattern turns the link off. breatherEnabled is the
+// link's master switch and autoLaunch the auto-launch toggle — both on by
+// default, so omitting them (as the old callers do) keeps the old behaviour;
+// either one off means no launch. Turning auto-launch off keeps the link
+// configured (the pattern is untouched), so flipping it back on resumes
+// launching; turning the link off is the same, at the link level.
+function shouldLaunchBreather(sessionKey, status, launchedFor, breakPattern, minutes, breatherEnabled, autoLaunch) {
   if (!breakPattern) return false
+  if (breatherEnabled !== undefined && !breatherEnabled) return false
+  if (autoLaunch !== undefined && !autoLaunch) return false
   if (!isBreakSession(sessionKey)) return false
   if (status !== "running") return false
   if (launchedFor === sessionKey) return false

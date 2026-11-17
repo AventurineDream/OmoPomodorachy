@@ -885,6 +885,102 @@ Item {
         }
       }
     }
+
+    // Breather link: whether the Breather opens on breaks, and whether
+    // it opens automatically. Both toggles persist in focusd.json
+    // (breatherEnabled, breatherAutoLaunch) and both default to on, so
+    // nothing changes until one is flipped. The pattern itself stays in
+    // focusd.json (breakPattern, "box" by default) — turning a toggle
+    // off keeps the pattern. The toggles are mouse/touch: the panel's
+    // key catcher owns Enter/Space (Keys.BeforeItem) and fires the
+    // panel action instead, so keyboard use never reaches the Toggle's
+    // own key handling — and can never double-fire with it.
+    Column {
+      width: parent.width
+      spacing: Style.space(10)
+
+      Rectangle {
+        width: parent.width
+        height: 1
+        color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+      }
+
+      RowLayout {
+        width: parent.width
+        spacing: Style.space(8)
+
+        Button {
+          text: root.timerService && root.timerService.breatherExpanded ? "▾" : "▸"
+          foreground: root.foreground
+          accent: root.activeColor
+          fontFamily: root.fontFamily
+          fontSize: Style.font.bodySmall
+          onClicked: if (root.timerService)
+            root.timerService.setBreatherExpanded(!root.timerService.breatherExpanded)
+        }
+
+        Text {
+          text: "Breather"
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+
+        Item {
+          Layout.fillWidth: true
+          implicitHeight: 1
+        }
+
+        Text {
+          text: root.timerService ? ((root.timerService.breatherEnabled && root.timerService.breakPattern !== "") ? root.timerService.breakPattern : "off") : ""
+          color: root.foreground
+          opacity: 0.6
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+      }
+
+      Column {
+        visible: root.timerService ? root.timerService.breatherExpanded : true
+        width: parent.width
+        spacing: Style.space(10)
+
+        Toggle {
+          width: parent.width
+          label: "Breather link"
+          description: "Open the Breather when a break starts."
+          checked: root.timerService ? root.timerService.breatherEnabled : true
+          foreground: root.foreground
+          accent: root.activeColor
+          fontFamily: root.fontFamily
+          onClicked: if (root.timerService)
+            root.timerService.setBreatherEnabled(!root.timerService.breatherEnabled)
+        }
+
+        Toggle {
+          width: parent.width
+          label: "Auto-launch on breaks"
+          description: "Open it automatically when a break starts. Off: open it yourself with tb."
+          checked: root.timerService ? root.timerService.breatherAutoLaunch : true
+          foreground: root.foreground
+          accent: root.activeColor
+          fontFamily: root.fontFamily
+          enabled: root.timerService ? root.timerService.breatherEnabled : true
+          onClicked: if (root.timerService)
+            root.timerService.setBreatherAutoLaunch(!root.timerService.breatherAutoLaunch)
+        }
+
+        Text {
+          text: "Pattern is breakPattern in focusd.json (box by default). Turning a toggle off keeps the pattern — flip it back on to resume."
+          color: root.foreground
+          opacity: 0.5
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+          wrapMode: Text.Wrap
+          width: parent.width - Style.space(36)
+        }
+      }
+    }
   }
 
   Item {

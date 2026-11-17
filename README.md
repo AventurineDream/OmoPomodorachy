@@ -105,10 +105,14 @@ Default configuration:
 { "sounds": true, "soundFile": "complete.oga" }
 ```
 
-`breakPattern` links the timer to Terminal-Breather: when a break starts, the Breather overlay opens with that pattern, for the break's remaining time (rounded down, so it ends a little before the break). Any pattern works — the built-ins (`box`, `478`, `coherent`) and your customs from `~/.config/omarchy/zen/patterns.json` (for example `slow-6`, `calm-466`, `breath-of-fire`); a name that doesn't exist falls back to `box` inside the Breather, silently. It launches once per break, on the first poll where the break is running — a break that starts paused waits until you resume it, and pausing mid-break doesn't relaunch it. Set it to `""` to turn the link off:
+`breakPattern` links the timer to Terminal-Breather: when a break starts, the Breather overlay opens with that pattern, for the break's remaining time (rounded down, so it ends a little before the break). Any pattern works — the built-ins (`box`, `478`, `coherent`) and your customs from `~/.config/omarchy/zen/patterns.json` (for example `slow-6`, `calm-466`, `breath-of-fire`); a name that doesn't exist falls back to `box` inside the Breather, silently. It launches once per break, on the first poll where the break is running — a break that starts paused waits until you resume it, and pausing mid-break doesn't relaunch it. Set it to `""` to turn the link off. The panel's Breather section has two toggles for the same link: `breatherEnabled` (the master switch) and `breatherAutoLaunch` (open it automatically when a break starts). Both are on by default, so nothing changes until one is flipped — and flipping one off keeps the pattern, so flipping it back on resumes launching. With auto-launch off, open the Breather yourself with `tb`. Turning auto-launch on mid-break launches for the rest of that break:
 
 ```json
 { "breakPattern": "478" }
+```
+
+```json
+{ "breatherEnabled": true, "breatherAutoLaunch": true }
 ```
 
 `rounds` stops the timer after that many work sessions in a run — set it to `4` and the timer stops after the fourth work session ends (the break is left paused, so it will not auto-start the next work session; resuming the break still opens the Breather). The panel shows the run's progress ("Rounds: 2 / 4 done"). `0` (the default) means off — run without a limit. A skipped work session counts as a round, the same way it counts for the chime. The count is in-memory: it resets when a run completes, when the daemon restarts, when the shell restarts, and when the day changes (sessions_today drops) — so a run stopped partway through yesterday starts fresh today, but stopping partway through a run and coming back later the same day picks up where it left off. Set it in the panel (Durations section, "Rounds" slider, 0–12, 0 is off) or in `focusd.json`:
@@ -189,8 +193,9 @@ Here are my other Omarchy plugins:
 
 Please give a star if you find them useful!
 
-## Panel (1.11.0)
+## Panel (1.12.0)
 
+- **Breather settings (1.12.0).** A "Breather" section in the panel, with a chevron like Durations and "Tag this block" (the choice is remembered in `focusd.json` as `breatherExpanded`; the pattern still shows on the right when collapsed). Two toggles: "Breather link" (the master switch) and "Auto-launch on breaks" (open it automatically when a break starts). Both are on by default and persist in `focusd.json` (`breatherEnabled`, `breatherAutoLaunch`); turning one off keeps the pattern (`breakPattern`, "box" by default), so flipping it back on resumes launching. With auto-launch off, open the Breather yourself with `tb`. The toggles are mouse/touch — the panel's key catcher owns Enter/Space, so keyboard use never reaches them.
 - **Tag section collapses (1.11.0).** "Tag this block" has a chevron, like Durations; collapse it to save space. The choice is remembered in `focusd.json` (`tagsExpanded`). The current tag still shows on the right when collapsed.
 - **Schedule row fits (1.11.0).** The "Queue current tag" row and the Durations Preset row no longer overflow the panel — their dropdowns flex to the space between the buttons, so the "Save schedule…" button is visible instead of clipped off-screen. The schedule-preset dropdown is labelled, so it reads as a preset picker even before any preset is saved.
 - **Session log export (1.10.0).** Set `focusLogPath` to any absolute path to export completed blocks there, regenerated whole on every block end or retag. A `.csv` path writes CSV (`Date,Tag,Minutes,Source`); anything else writes the Markdown table. Off by default; an existing file is only replaced when it starts with the generated header.
