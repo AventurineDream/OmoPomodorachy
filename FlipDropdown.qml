@@ -87,7 +87,14 @@ Item {
   // stays below, as the shell does.
   property bool popupAbove: false
   function updatePopupDirection() {
-    var topInWindow = trigger.mapToScene(0, 0).y
+    // Qt 6 removed Item.mapToScene: scene coordinates come from
+    // mapToItem(null, ...). (The Qt 5 call threw a TypeError at
+    // runtime and the dropdown never opened.) The shell does the
+    // same throughout — Bar.qml maps scene points with
+    // mapToItem(null, ...) — and MultiSelect.qml calls
+    // trigger.mapToItem on a BorderSurface trigger, so this is
+    // the proven call on this exact type.
+    var topInWindow = trigger.mapToItem(null, 0, 0).y
     var below = Window.height - (topInWindow + trigger.height)
     root.popupAbove = below < root.popupHeight + Style.spacing.xxs
                       && topInWindow >= root.popupHeight + Style.spacing.xxs

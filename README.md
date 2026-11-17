@@ -193,6 +193,10 @@ Here are my other Omarchy plugins:
 
 Please give a star if you find them useful!
 
+## Panel (1.13.3)
+
+- **Dropdowns open again (1.13.3).** Regression from 1.13.1: the panel opened, but tapping any dropdown did nothing. The flip code measured the trigger with `trigger.mapToScene(0, 0)`, a Qt 5 call Qt 6 removed, so every open threw a `TypeError` before the popup could appear. The fix measures with `trigger.mapToItem(null, 0, 0)` instead — the Qt 6 scene-mapping call, the same one the shell itself uses (Bar.qml, MultiSelect.qml); the flip rule is unchanged.
+
 ## Panel (1.13.2)
 
 - **Pomo panel opens again (1.13.2).** Regression from 1.13.1: the panel stopped opening entirely. The vendored `FlipDropdown.qml` uses `BorderSurface`, which lives in the shell's `qs.Ui` module — the shell's own dropdown resolves it as a sibling file in the Ui directory, but the vendored copy lives in the plugin directory and did not import `qs.Ui`, so the panel failed to load at runtime (`BorderSurface is not a type`). The fix adds the missing `import qs.Ui`; nothing else changed.
