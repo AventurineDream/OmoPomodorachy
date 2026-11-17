@@ -390,7 +390,7 @@ Item {
             Layout.preferredWidth: Style.space(78)
           }
 
-          Dropdown {
+          FlipDropdown {
             // Flexes between the label and the Save as… button: a fixed
             // 240px width overflowed the 390px panel and clipped the
             // button off-screen.
@@ -773,7 +773,7 @@ Item {
               root.timerService.enqueueTag(root.timerService.currentTag)
           }
 
-          Dropdown {
+          FlipDropdown {
             // Flexes between the Queue and Save buttons: a fixed 240px
             // width overflowed the 390px panel and clipped the Save
             // schedule… button entirely off-screen.
@@ -986,7 +986,7 @@ Item {
             Layout.preferredWidth: Style.space(78)
           }
 
-          Dropdown {
+          FlipDropdown {
             // Same shape as the Preset row: a fixed-width label and a
             // dropdown that flexes to the space, so the row never
             // overflows the 390px panel. Disabled while the link is off.
