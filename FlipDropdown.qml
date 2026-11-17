@@ -87,10 +87,13 @@ Item {
   // stays below, as the shell does.
   property bool popupAbove: false
   function updatePopupDirection() {
-    // Qt 6 removed Item.mapToScene: scene coordinates come from
-    // mapToItem(null, ...). (The Qt 5 call threw a TypeError at
-    // runtime and the dropdown never opened.) The shell does the
-    // same throughout — Bar.qml maps scene points with
+    // QML Item never had mapToScene (it exists only on the C++
+    // QQuickItem side) — scene coordinates come from
+    // mapToItem(null, ...). Do not "fix" this back to mapToScene:
+    // it is not a function here, and the old call threw a
+    // TypeError at runtime that aborted the open, so the
+    // dropdown never opened. The shell does the same
+    // throughout — Bar.qml maps scene points with
     // mapToItem(null, ...) — and MultiSelect.qml calls
     // trigger.mapToItem on a BorderSurface trigger, so this is
     // the proven call on this exact type.
