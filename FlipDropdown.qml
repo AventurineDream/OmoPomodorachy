@@ -4,6 +4,12 @@ import QtQuick.Window
 import qs.Commons
 import qs.Commons as Commons
 
+// BorderSurface lives in qs.Ui: the shell's Dropdown.qml resolves it as a
+// sibling file in the Ui directory, but this vendored copy lives in the
+// plugin directory, so it must import qs.Ui explicitly. Without this
+// import the panel fails to load at runtime ("BorderSurface is not a type").
+import qs.Ui
+
 // Vendored copy of the omarchy shell's qs.Ui Dropdown
 // (/usr/share/omarchy/shell/Ui/Dropdown.qml), with one change: the
 // popup flips above the trigger when there is no room below it.
