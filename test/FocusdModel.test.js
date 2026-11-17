@@ -164,6 +164,16 @@ const collideRaw = JSON.stringify({ patterns: [
 const collideOpts = M.breatherPatternOptions(collideRaw);
 check("built-in collision ignored, bad keys and nameless skipped, dup kept once", collideOpts.length === 5 && collideOpts[3].value === "dup" && collideOpts[3].label === "First" && collideOpts[4].value === "good-one");
 check("parseBreatherCustomPatterns parses keys and names only", JSON.stringify(M.parseBreatherCustomPatterns(customsRaw)) === JSON.stringify([{ key: "slow-6", name: "Slow 6" }, { key: "calm-466", name: "Calm 4-6-6" }, { key: "breath-of-fire", name: "Breath of Fire" }]));
+const namelessFirstRaw = JSON.stringify({ patterns: [
+  { key: "slow-6", phases: [{ label: "In", secs: 6, to: 1 }, { label: "Out", secs: 6, to: 0 }] },
+  { key: "slow-6", name: "Slow 6", phases: [{ label: "In", secs: 6, to: 1 }, { label: "Out", secs: 6, to: 0 }] },
+] });
+const namelessFirstOpts = M.breatherPatternOptions(namelessFirstRaw);
+check("nameless entry does not poison the key for a later named entry", namelessFirstOpts.length === 4 && namelessFirstOpts[3].value === "slow-6" && namelessFirstOpts[3].label === "Slow 6");
+const capsRaw = JSON.stringify({ patterns: [
+  { key: "Slow-6", name: "Slow 6", phases: [{ label: "In", secs: 6, to: 1 }, { label: "Out", secs: 6, to: 0 }] },
+] });
+check("capitalised custom key is offered lowercased (Breather lowercases too)", JSON.stringify(M.parseBreatherCustomPatterns(capsRaw)) === JSON.stringify([{ key: "slow-6", name: "Slow 6" }]));
 
 // --- Durations (TOML parse / update) ---
 const SAMPLE_TOML = [

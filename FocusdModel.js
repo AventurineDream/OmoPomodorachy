@@ -473,9 +473,12 @@ function parseBreatherCustomPatterns(raw) {
       var key = p.key.toLowerCase()
       if (!/^[a-z0-9][a-z0-9-]*$/.test(key)) continue
       if (seen[key]) continue
-      seen[key] = true
       if (BREATHER_PATTERN_NAMES[key]) continue
       if (typeof p.name !== "string" || p.name.length === 0) continue
+      // Only mark a key seen once it has passed every check and is about
+      // to be offered: a nameless entry must not poison the key for a
+      // later named entry with the same key.
+      seen[key] = true
       out.push({ key: key, name: p.name })
     }
   } catch (e) {}
