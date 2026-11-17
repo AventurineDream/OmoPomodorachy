@@ -32,15 +32,25 @@ Item {
   property string soundFile: Model.DEFAULT_SOUND
   // Breather link. breakPattern is the pattern the Breather opens with
   // when a break starts ("box" by default); an empty pattern turns the
-  // link off. breatherLaunchedFor is the session key the Breather already
-  // launched for, so a break launches once; it clears when a work session
-  // starts. Set in configure() from ~/.config/omarchy/focusd.json.
+  // link off. breatherEnabled is the link's master switch and
+  // breatherAutoLaunch the auto-launch toggle — both on by default, so a
+  // config written before they existed keeps the old behaviour. Either
+  // one off means no launch; turning one off keeps the pattern, so
+  // flipping it back on resumes launching. breatherExpanded is whether
+  // the panel's Breather section is expanded. All three are set in
+  // configure() from ~/.config/omarchy/focusd.json, and the panel
+  // persists them there.
+  property string breakPattern: "box"
+  property bool breatherEnabled: true
+  property bool breatherAutoLaunch: true
+  property bool breatherExpanded: true
+  // breatherLaunchedFor is the session key the Breather already launched
+  // for, so a break launches once; it clears when a work session starts.
   // suppressBreatherUntilPaused holds the Breather off after a run ends:
   // the run-end reset is async, so the break still reads running for a
   // poll or two, and without this the Breather would launch for a break
   // that is about to sit paused. It clears when a poll sees the break
   // paused, so a later resume launches as intended.
-  property string breakPattern: "box"
   property string breatherLaunchedFor: ""
   property bool suppressBreatherUntilPaused: false
 
@@ -193,6 +203,13 @@ Item {
     // empty pattern turns the link off. "box" is the default.
     var bp = root.fileConfig && root.fileConfig.breakPattern;
     root.breakPattern = (bp === undefined || bp === null) ? "box" : String(bp);
+    // Breather toggles: the link's master switch and the auto-launch
+    // toggle. Both on unless the config turns them off, so a config
+    // written before they existed keeps launching on breaks.
+    root.breatherEnabled = Model.parseOnByDefault(root.fileConfig && root.fileConfig.breatherEnabled);
+    root.breatherAutoLaunch = Model.parseOnByDefault(root.fileConfig && root.fileConfig.breatherAutoLaunch);
+    // Breather section collapsed or expanded. Defaults to expanded.
+    root.breatherExpanded = Model.parseOnByDefault(root.fileConfig && root.fileConfig.breatherExpanded);
     // Rounds before stop: how many work sessions run before the timer
     // stops. 0 (the default) means off — run without a limit.
     var r = root.fileConfig && root.fileConfig.rounds;
@@ -363,6 +380,32 @@ Item {
   function setTagsExpanded(expanded) {
     root.tagsExpanded = !!expanded;
     root.writeFocusdJson("tagsExpanded", root.tagsExpanded);
+  }
+
+  // Whether the Breather link is on (the master switch: off means no
+  // Breather launch on breaks, and the pattern is kept so flipping it
+  // back on resumes launching). Persisted in focusd.json.
+  function setBreatherEnabled(enabled) {
+    root.breatherEnabled = !!enabled;
+    root.writeFocusdJson("breatherEnabled", root.breatherEnabled);
+  }
+
+  // Whether the Breather opens automatically when a break starts. Off
+  // means no auto-launch — open it yourself with `tb` — and the link
+  // stays configured, so flipping it back on resumes launching. Turning
+  // it on mid-break launches for the rest of that break (the next poll
+  // sees a running break with nothing launched for it yet). Persisted
+  // in focusd.json.
+  function setBreatherAutoLaunch(enabled) {
+    root.breatherAutoLaunch = !!enabled;
+    root.writeFocusdJson("breatherAutoLaunch", root.breatherAutoLaunch);
+  }
+
+  // Whether the Breather section in the panel is expanded. Persisted
+  // so the choice sticks across shell restarts.
+  function setBreatherExpanded(expanded) {
+    root.breatherExpanded = !!expanded;
+    root.writeFocusdJson("breatherExpanded", root.breatherExpanded);
   }
 
   // Write a tag/schedule key to focusd.json, recording a refusal so
@@ -1061,7 +1104,7 @@ Item {
       root.breatherLaunchedFor = "";
     } else if (!runEnded && !root.suppressBreatherUntilPaused) {
       var breakMinutes = Model.parseMinutes(state.text);
-      if (Model.shouldLaunchBreather(sessionKey, newStatus, root.breatherLaunchedFor, root.breakPattern, breakMinutes)) {
+      if (Model.shouldLaunchBreather(sessionKey, newStatus, root.breatherLaunchedFor, root.breakPattern, breakMinutes, root.breatherEnabled, root.breatherAutoLaunch)) {
         root.breatherLaunchedFor = sessionKey;
         Quickshell.execDetached(Model.breatherCommand(root.breakPattern, breakMinutes));
       }
