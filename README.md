@@ -193,6 +193,10 @@ Here are my other Omarchy plugins:
 
 Please give a star if you find them useful!
 
+## Panel (1.13.2)
+
+- **Pomo panel opens again (1.13.2).** Regression from 1.13.1: the panel stopped opening entirely. The vendored `FlipDropdown.qml` uses `BorderSurface`, which lives in the shell's `qs.Ui` module — the shell's own dropdown resolves it as a sibling file in the Ui directory, but the vendored copy lives in the plugin directory and did not import `qs.Ui`, so the panel failed to load at runtime (`BorderSurface is not a type`). The fix adds the missing `import qs.Ui`; nothing else changed.
+
 ## Panel (1.13.1)
 
 - **Dropdown menus flip upward (1.13.1).** The panel's dropdowns (Durations preset, schedule preset, Breather pattern) no longer run off the bottom of the screen: the menu now opens above the trigger when there is no room below it, and below as before when there is. The shell's dropdown always opens downward with no screen clamping, so a trigger near the bottom of this panel — the Breather pattern picker sits low — opened its menu past the bottom edge of a 768px display, and the list could not scroll to reach the hidden rows (every row fit inside the menu, so there was nothing to scroll). The panel now uses a local `FlipDropdown.qml`, a verbatim copy of the shell dropdown with only the flip added, for all three dropdowns; nothing else about them changed.
