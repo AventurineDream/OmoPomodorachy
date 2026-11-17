@@ -442,6 +442,61 @@ function shouldLaunchBreather(sessionKey, status, launchedFor, breakPattern, min
   if (minutes <= 0) return false
   return true
 }
+
+// ---- Breather pattern picker (panel) ----
+// The panel's Breather section offers a pattern Dropdown. The options are
+// the three built-ins (box, 478, coherent) plus the customs from
+// ~/.config/omarchy/zen/patterns.json, in file order — the same list the
+// Breather's own picker shows. Only the key and name are needed here (the
+// Breather validates the phases when the pattern is actually used, and an
+// unknown name falls back to box inside the Breather), so a custom entry
+// needs just a valid key and a non-empty name to be offered; anything
+// else is skipped, never fatal. A custom key that collides with a
+// built-in is ignored — built-ins win.
+var BREATHER_PATTERN_ORDER = ["box", "478", "coherent"]
+var BREATHER_PATTERN_NAMES = {
+  box: "Box breathing",
+  "478": "4-7-8",
+  coherent: "Coherent"
+}
+
+function parseBreatherCustomPatterns(raw) {
+  var out = []
+  var seen = {}
+  try {
+    var parsed = JSON.parse(raw || "{}")
+    var list = parsed && parsed.patterns
+    if (!Array.isArray(list)) return out
+    for (var i = 0; i < list.length; i++) {
+      var p = list[i]
+      if (!p || typeof p.key !== "string") continue
+      var key = p.key.toLowerCase()
+      if (!/^[a-z0-9][a-z0-9-]*$/.test(key)) continue
+      if (seen[key]) continue
+      seen[key] = true
+      if (BREATHER_PATTERN_NAMES[key]) continue
+      if (typeof p.name !== "string" || p.name.length === 0) continue
+      out.push({ key: key, name: p.name })
+    }
+  } catch (e) {}
+  return out
+}
+
+// Option lists for the panel's pattern Dropdown: { value, label } pairs
+// the shell Dropdown renders (label is what shows, value is what is
+// emitted). Built-ins first, customs after, in file order.
+function breatherPatternOptions(patternsRaw) {
+  var out = []
+  for (var i = 0; i < BREATHER_PATTERN_ORDER.length; i++) {
+    var k = BREATHER_PATTERN_ORDER[i]
+    out.push({ value: k, label: BREATHER_PATTERN_NAMES[k] })
+  }
+  var customs = parseBreatherCustomPatterns(patternsRaw)
+  for (var j = 0; j < customs.length; j++)
+    out.push({ value: customs[j].key, label: customs[j].name })
+  return out
+}
+
 // ---- Block tagging (Phase 5) ----
 // Each work block gets a category, picked in advance (the picker sets the
 // tag for the next/current work block) or afterwards (the panel's Last row

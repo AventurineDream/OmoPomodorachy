@@ -6,7 +6,7 @@ const os = require("os");
 const { execFileSync } = require("child_process");
 const src = fs.readFileSync(path.join(__dirname, "..", "FocusdModel.js"), "utf8");
 const factory = new Function(
-  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, parseOnByDefault, shouldLaunchBreather, DURATION_LIMITS, clampDuration, parseDurations, presetSection, updateDuration, listPresets, setActivePreset, validPresetName, savePresetAs, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, addTag, removeTag, enqueueTag, removeScheduledTag, filterSchedule, shiftSchedule, saveSchedulePreset, loadSchedulePreset, deleteSchedulePreset, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, setJsonKey, configTextOk, FOCUS_LOG_HEADER, FOCUS_LOG_CSV_HEADER, focusLogFormat, focusLogText, focusLogCsvText, focusLogCommand, FOCUS_LOG_GUARD_SKIP_EXIT, focusLogSkipMessage };"
+  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, parseOnByDefault, shouldLaunchBreather, breatherPatternOptions, parseBreatherCustomPatterns, DURATION_LIMITS, clampDuration, parseDurations, presetSection, updateDuration, listPresets, setActivePreset, validPresetName, savePresetAs, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, addTag, removeTag, enqueueTag, removeScheduledTag, filterSchedule, shiftSchedule, saveSchedulePreset, loadSchedulePreset, deleteSchedulePreset, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, setJsonKey, configTextOk, FOCUS_LOG_HEADER, FOCUS_LOG_CSV_HEADER, focusLogFormat, focusLogText, focusLogCsvText, focusLogCommand, FOCUS_LOG_GUARD_SKIP_EXIT, focusLogSkipMessage };"
 );
 const M = factory();
 
@@ -136,6 +136,34 @@ check("link off: no launch", M.shouldLaunchBreather("short-break", "running", ""
 check("auto-launch off: no launch", M.shouldLaunchBreather("short-break", "running", "", "box", 5, true, false) === false);
 check("both toggles off: no launch", M.shouldLaunchBreather("short-break", "running", "", "box", 5, false, false) === false);
 check("both toggles on: launch", M.shouldLaunchBreather("short-break", "running", "", "box", 5, true, true) === true);
+
+// --- breatherPatternOptions (panel pattern picker) ---
+const emptyOpts = M.breatherPatternOptions("");
+check("no customs: built-ins only", emptyOpts.length === 3 && emptyOpts[0].value === "box" && emptyOpts[1].value === "478" && emptyOpts[2].value === "coherent");
+check("built-in labels", emptyOpts[0].label === "Box breathing" && emptyOpts[1].label === "4-7-8" && emptyOpts[2].label === "Coherent");
+check("missing raw: built-ins only", M.breatherPatternOptions().length === 3);
+check("malformed JSON: built-ins only, no throw", M.breatherPatternOptions("{not json").length === 3);
+check("no patterns array: built-ins only", M.breatherPatternOptions('{"other": 1}').length === 3);
+const customsRaw = JSON.stringify({ patterns: [
+  { key: "slow-6", name: "Slow 6", phases: [{ label: "Breathe in", secs: 6, to: 1 }, { label: "Breathe out", secs: 6, to: 0 }] },
+  { key: "calm-466", name: "Calm 4-6-6", phases: [{ label: "Breathe in", secs: 4, to: 1 }, { label: "Breathe out", secs: 6, to: 0 }] },
+  { key: "breath-of-fire", name: "Breath of Fire", phases: [{ label: "In", secs: 0.5, to: 1 }, { label: "Out", secs: 0.5, to: 0 }] },
+] });
+const customsOpts = M.breatherPatternOptions(customsRaw);
+check("customs append in file order", customsOpts.length === 6 && customsOpts[3].value === "slow-6" && customsOpts[4].value === "calm-466" && customsOpts[5].value === "breath-of-fire");
+check("custom labels come from the file", customsOpts[3].label === "Slow 6" && customsOpts[5].label === "Breath of Fire");
+const collideRaw = JSON.stringify({ patterns: [
+  { key: "box", name: "My Box", phases: [{ label: "In", secs: 4, to: 1 }, { label: "Out", secs: 4, to: 0 }] },
+  { key: "BOX", name: "Upper Box", phases: [{ label: "In", secs: 4, to: 1 }, { label: "Out", secs: 4, to: 0 }] },
+  { key: "bad key!", name: "Bad Key", phases: [{ label: "In", secs: 4, to: 1 }, { label: "Out", secs: 4, to: 0 }] },
+  { key: "noname", phases: [{ label: "In", secs: 4, to: 1 }, { label: "Out", secs: 4, to: 0 }] },
+  { key: "dup", name: "First", phases: [{ label: "In", secs: 4, to: 1 }, { label: "Out", secs: 4, to: 0 }] },
+  { key: "dup", name: "Second", phases: [{ label: "In", secs: 4, to: 1 }, { label: "Out", secs: 4, to: 0 }] },
+  { key: "good-one", name: "Good One", phases: [{ label: "In", secs: 4, to: 1 }, { label: "Out", secs: 4, to: 0 }] },
+] });
+const collideOpts = M.breatherPatternOptions(collideRaw);
+check("built-in collision ignored, bad keys and nameless skipped, dup kept once", collideOpts.length === 5 && collideOpts[3].value === "dup" && collideOpts[3].label === "First" && collideOpts[4].value === "good-one");
+check("parseBreatherCustomPatterns parses keys and names only", JSON.stringify(M.parseBreatherCustomPatterns(customsRaw)) === JSON.stringify([{ key: "slow-6", name: "Slow 6" }, { key: "calm-466", name: "Calm 4-6-6" }, { key: "breath-of-fire", name: "Breath of Fire" }]));
 
 // --- Durations (TOML parse / update) ---
 const SAMPLE_TOML = [

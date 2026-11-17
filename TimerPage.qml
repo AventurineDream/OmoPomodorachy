@@ -886,15 +886,18 @@ Item {
       }
     }
 
-    // Breather link: whether the Breather opens on breaks, and whether
-    // it opens automatically. Both toggles persist in focusd.json
-    // (breatherEnabled, breatherAutoLaunch) and both default to on, so
-    // nothing changes until one is flipped. The pattern itself stays in
-    // focusd.json (breakPattern, "box" by default) — turning a toggle
-    // off keeps the pattern. The toggles are mouse/touch: the panel's
-    // key catcher owns Enter/Space (Keys.BeforeItem) and fires the
-    // panel action instead, so keyboard use never reaches the Toggle's
-    // own key handling — and can never double-fire with it.
+    // Breather link: whether the Breather opens on breaks, whether it
+    // opens automatically, and with which pattern. The toggles and the
+    // pattern persist in focusd.json (breatherEnabled,
+    // breatherAutoLaunch, breakPattern) and all default to on / "box",
+    // so nothing changes until one is flipped. Turning a toggle off
+    // keeps the pattern. The pattern picker lists the built-ins plus
+    // the customs from ~/.config/omarchy/zen/patterns.json, and is
+    // disabled while the link is off. The toggles and the picker are
+    // mouse/touch: the panel's key catcher owns Enter/Space
+    // (Keys.BeforeItem) and fires the panel action instead, so keyboard
+    // use never reaches their own key handling — and can never
+    // double-fire with it.
     Column {
       width: parent.width
       spacing: Style.space(10)
@@ -970,8 +973,41 @@ Item {
             root.timerService.setBreatherAutoLaunch(!root.timerService.breatherAutoLaunch)
         }
 
+        RowLayout {
+          width: parent.width
+          spacing: Style.space(8)
+
+          Text {
+            text: "Pattern"
+            color: root.foreground
+            opacity: 0.7
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            Layout.preferredWidth: Style.space(78)
+          }
+
+          Dropdown {
+            // Same shape as the Preset row: a fixed-width label and a
+            // dropdown that flexes to the space, so the row never
+            // overflows the 390px panel. Disabled while the link is off.
+            Layout.fillWidth: true
+            label: ""
+            showLabel: false
+            value: root.timerService ? root.timerService.breakPattern : "box"
+            options: root.timerService ? root.timerService.patternOptions : []
+            foreground: root.foreground
+            accent: root.activeColor
+            fontFamily: root.fontFamily
+            enabled: root.timerService ? root.timerService.breatherEnabled : true
+            onChanged: function (v) {
+              if (root.timerService)
+                root.timerService.setBreakPattern(v);
+            }
+          }
+        }
+
         Text {
-          text: "Pattern is breakPattern in focusd.json (box by default). Turning a toggle off keeps the pattern — flip it back on to resume."
+          text: "Turning a toggle off keeps the pattern — flip it back on to resume."
           color: root.foreground
           opacity: 0.5
           font.family: root.fontFamily
