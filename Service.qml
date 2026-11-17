@@ -44,6 +44,13 @@ Item {
   property bool breatherEnabled: true
   property bool breatherAutoLaunch: true
   property bool breatherExpanded: true
+  // Breather pattern options for the panel's pattern Dropdown: the
+  // built-ins plus the customs from patterns.json, as { value, label }
+  // pairs. Loaded with the same read-config helper as focusd.json and
+  // re-read on the 10s poll, so editing patterns.json updates the list.
+  readonly property string patternsPath: Quickshell.env("HOME") + "/.config/omarchy/zen/patterns.json"
+  property string patternsRaw: ""
+  readonly property var patternOptions: Model.breatherPatternOptions(root.patternsRaw)
   // breatherLaunchedFor is the session key the Breather already launched
   // for, so a break launches once; it clears when a work session starts.
   // suppressBreatherUntilPaused holds the Breather off after a run ends:
@@ -333,6 +340,30 @@ Item {
     root.configure();
   }
 
+  // Breather patterns: read ~/.config/omarchy/zen/patterns.json with
+  // the same read-config helper as focusd.json, on the same 10s poll.
+  // A missing file is not an error (read-config exits 0 with no
+  // output) — the options are just the built-ins then. A failed read
+  // keeps the last good text, so a transient failure never blanks the
+  // picker. The raw text feeds patternOptions; the model parses it.
+  function loadPatterns() {
+    if (patternsProc.running)
+      return;
+    patternsProc.collected = "";
+    patternsProc.collectedBytes = 0;
+    patternsProc.overflowed = false;
+    patternsProc.timedOut = false;
+    patternsProc.command = ["bash", root.readScriptPath, root.patternsPath, String(root.maxConfigBytes)];
+    patternsWatchdog.restart();
+    patternsProc.running = true;
+  }
+
+  function applyPatterns(ok, raw) {
+    if (!ok)
+      return;
+    root.patternsRaw = String(raw || "");
+  }
+
   // Write one key of focusd.json, from the last-read config so the
   // other keys are kept. Refused while the last read failed or the file
   // is invalid (configOk false — the cached config is {} then, and
@@ -406,6 +437,17 @@ Item {
   function setBreatherExpanded(expanded) {
     root.breatherExpanded = !!expanded;
     root.writeFocusdJson("breatherExpanded", root.breatherExpanded);
+  }
+
+  // The Breather pattern, picked in the panel's Breather section.
+  // Persisted in focusd.json as breakPattern ("box" by default); the
+  // break-time summon uses it. The picker is disabled while the link
+  // is off, so the pattern is never changed by accident — and a stored
+  // pattern survives toggling the link off and back on.
+  function setBreakPattern(pattern) {
+    var p = String(pattern || "");
+    root.breakPattern = p;
+    root.writeFocusdJson("breakPattern", p);
   }
 
   // Write a tag/schedule key to focusd.json, recording a refusal so
@@ -530,6 +572,20 @@ Item {
         configProc.collected = "";
         configProc.collectedBytes = 0;
         root.killProc(configProc);
+      }
+    }
+  }
+
+  Timer {
+    id: patternsWatchdog
+    interval: root.configTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (patternsProc.running) {
+        patternsProc.timedOut = true;
+        patternsProc.collected = "";
+        patternsProc.collectedBytes = 0;
+        root.killProc(patternsProc);
       }
     }
   }
@@ -761,6 +817,7 @@ Item {
       root.loadConfig();
       root.loadDurations();
       root.loadSessions();
+      root.loadPatterns();
     }
   }
 
@@ -902,6 +959,53 @@ Item {
       configProc.overflowed = false;
       configProc.timedOut = false;
       root.applyConfig(ok, output);
+    }
+  }
+
+  Process {
+    id: patternsProc
+    property string collected: ""
+    property int collectedBytes: 0
+    property bool overflowed: false
+    property bool timedOut: false
+    stdout: SplitParser {
+      onRead: function (data) {
+        if (patternsProc.overflowed || patternsProc.timedOut)
+          return;
+        var chunk = String(data + "\n");
+        if (patternsProc.collectedBytes + chunk.length > root.maxConfigBytes) {
+          patternsProc.overflowed = true;
+          patternsProc.collected = "";
+          patternsProc.collectedBytes = 0;
+          root.killProc(patternsProc);
+          return;
+        }
+        patternsProc.collected += chunk;
+        patternsProc.collectedBytes += chunk.length;
+      }
+    }
+    stderr: SplitParser {
+      onRead: function (data) {
+        if (patternsProc.overflowed || patternsProc.timedOut)
+          return;
+        patternsProc.collectedBytes += String(data + "\n").length;
+        if (patternsProc.collectedBytes > root.maxConfigBytes) {
+          patternsProc.overflowed = true;
+          patternsProc.collected = "";
+          patternsProc.collectedBytes = 0;
+          root.killProc(patternsProc);
+        }
+      }
+    }
+    onExited: function (exitCode) {
+      patternsWatchdog.stop();
+      var ok = !patternsProc.overflowed && !patternsProc.timedOut && exitCode === 0;
+      var output = String(patternsProc.collected);
+      patternsProc.collected = "";
+      patternsProc.collectedBytes = 0;
+      patternsProc.overflowed = false;
+      patternsProc.timedOut = false;
+      root.applyPatterns(ok, output);
     }
   }
 
@@ -1220,6 +1324,7 @@ Item {
     root.loadConfig();
     root.loadDurations();
     root.loadSessions();
+    root.loadPatterns();
   }
   Component.onDestruction: {
     if (FocusdShared.ServiceBridge.service === root)
