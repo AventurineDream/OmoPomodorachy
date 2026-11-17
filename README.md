@@ -193,6 +193,10 @@ Here are my other Omarchy plugins:
 
 Please give a star if you find them useful!
 
+## Panel (1.13.1)
+
+- **Dropdown menus flip upward (1.13.1).** The panel's dropdowns (Durations preset, schedule preset, Breather pattern) no longer run off the bottom of the screen: the menu now opens above the trigger when there is no room below it, and below as before when there is. The shell's dropdown always opens downward with no screen clamping, so a trigger near the bottom of this panel — the Breather pattern picker sits low — opened its menu past the bottom edge of a 768px display, and the list could not scroll to reach the hidden rows (every row fit inside the menu, so there was nothing to scroll). The panel now uses a local `FlipDropdown.qml`, a verbatim copy of the shell dropdown with only the flip added, for all three dropdowns; nothing else about them changed.
+
 ## Panel (1.13.0)
 
 - **Breather pattern picker (1.13.0).** The panel's "Breather" section now has a "Pattern" dropdown next to the two toggles, listing the built-ins (`Box breathing`, `4-7-8`, `Coherent`) plus your customs from `~/.config/omarchy/zen/patterns.json`. Picking one writes `breakPattern` in `focusd.json`, and the next break opens the Breather with it. The picker is disabled while the Breather link is off; turning a toggle off keeps the pattern, so flipping it back on resumes launching with the same pattern.

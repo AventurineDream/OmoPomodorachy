@@ -1,12 +1,28 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Window
 import qs.Commons
 import qs.Commons as Commons
 
+// Vendored copy of the omarchy shell's qs.Ui Dropdown
+// (/usr/share/omarchy/shell/Ui/Dropdown.qml), with one change: the
+// popup flips above the trigger when there is no room below it.
+//
+// The shell component always anchors its popup below the trigger
+// (y = trigger.height + gap) with no screen clamping. On a 768px
+// display a trigger near the bottom of this panel opens its menu
+// off the bottom edge — and the list cannot scroll to reach the
+// hidden rows, because every row fits inside the popup, so the
+// ListView has nothing to scroll. This copy keeps the shell's
+// visuals, keyboard handling and 8-row popup cap, and only adds the
+// flip (popupHeight / popupAbove / updatePopupDirection). Keep it
+// diffable against the shell source: any other change belongs
+// upstream, not here.
+//
 // Themed single-select dropdown. Trigger row paints with the kit's focus
-// chrome; the popup anchors below and uses Commons.Color.popups.background +
-// Commons.Color.popups.border so it reads as a panel surface rather than the
-// platform-native ComboBox look.
+// chrome; the popup anchors below (or above, when flipped) and uses
+// Commons.Color.popups.background + Commons.Color.popups.border so it
+// reads as a panel surface rather than the platform-native ComboBox look.
 //
 // `options` accepts either a plain string[] or an array of
 // { value, label } objects (label is what we render; value is what we
@@ -14,8 +30,6 @@ import qs.Commons as Commons
 //
 // Keyboard: Tab to focus the trigger, Enter/Space opens, Esc closes,
 // j/k or Up/Down walks options inside the open popup, Enter selects.
-// A sibling SearchableDropdown reuses the same visuals but adds an
-// embedded filter input — keep the two separate so each stays simple.
 Item {
   id: root
 
@@ -44,9 +58,34 @@ Item {
   // own keyCatcher so j/k inside the popup don't double-drive the panel
   // cursor.
   readonly property bool popupOpen: popup.opened
-  function open() { popup.open() }
+  function open() { root.updatePopupDirection(); popup.open() }
   function close() { popup.close() }
-  function toggle() { popup.opened ? popup.close() : popup.open() }
+  function toggle() { popup.opened ? popup.close() : root.open() }
+
+  // Height the popup needs for its options, with the shell's 8-row
+  // cap: the list scrolls past 8 rows, and the popup never grows
+  // beyond it. This is exactly the popup's implicitHeight below,
+  // named so the flip decision can use it.
+  readonly property real popupHeight: Math.min(root.options.length * root.popupRowHeight + Math.max(0, root.options.length - 1) * Style.spacing.labelGap,
+                                               root.popupRowHeight * 8 + 7 * Style.spacing.labelGap)
+                                      + popup.topPadding + popup.bottomPadding
+
+  // True when the popup should open above the trigger instead of
+  // below it. Decided on every open from the trigger's position
+  // inside the panel window: the window's bottom sits a little above
+  // the screen bottom (the panel hangs below the top bar and is
+  // shorter than the display), so fitting inside the window is a
+  // conservative fit on screen, and it holds whatever the bar
+  // position is. Flipping up only happens when the space below is
+  // short AND the space above fits the popup; otherwise the popup
+  // stays below, as the shell does.
+  property bool popupAbove: false
+  function updatePopupDirection() {
+    var topInWindow = trigger.mapToScene(0, 0).y
+    var below = Window.height - (topInWindow + trigger.height)
+    root.popupAbove = below < root.popupHeight + Style.spacing.xxs
+                      && topInWindow >= root.popupHeight + Style.spacing.xxs
+  }
 
   signal changed(string value)
   signal hovered(bool isHovered)
@@ -104,7 +143,7 @@ Item {
       Keys.onPressed: function(event) {
         if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
             || event.key === Qt.Key_Space || event.key === Qt.Key_Down) {
-          popup.opened ? popup.close() : popup.open()
+          popup.opened ? popup.close() : root.open()
           event.accepted = true
         } else if (event.key === Qt.Key_Escape && popup.opened) {
           popup.close(); event.accepted = true
@@ -144,19 +183,17 @@ Item {
         // instead of reopening.
         onClicked: {
           trigger.forceActiveFocus()
-          popup.opened ? popup.close() : popup.open()
+          popup.opened ? popup.close() : root.open()
         }
       }
 
       Popup {
         id: popup
         x: 0
-        y: trigger.height + Style.spacing.xxs
+        y: root.popupAbove ? -(root.popupHeight + Style.spacing.xxs) : trigger.height + Style.spacing.xxs
         closePolicy: Popup.CloseOnPressOutsideParent | Popup.CloseOnEscape
         width: trigger.width
-        implicitHeight: Math.min(root.options.length * root.popupRowHeight + Math.max(0, root.options.length - 1) * Style.spacing.labelGap,
-                                 root.popupRowHeight * 8 + 7 * Style.spacing.labelGap)
-                        + topPadding + bottomPadding
+        implicitHeight: root.popupHeight
         padding: Style.spacing.hairline
         leftPadding: Border.left(root.popupBorderSpec) + Style.spacing.hairline
         rightPadding: Border.right(root.popupBorderSpec) + Style.spacing.hairline
