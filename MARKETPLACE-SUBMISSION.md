@@ -1,7 +1,7 @@
 # Omarchy plugin marketplace submission draft
 
 Do not submit until the maintainer confirms each checklist statement, especially permission to submit this fork and its preview assets. The official marketplace requires a public root plugin, README install/removal instructions, license/dependencies, and explicit owner confirmation.
-**Marketplace blocker:** `bibek.focusd` is already listed for https://github.com/BibekBhusal0/omarchy-focusd. The marketplace treats plugin IDs as global and permanent, so this repository cannot be submitted as a separate listing with the current ID. Resolve the ID/listing ownership before submission; changing the ID may require a compatibility/migration plan.
+**Marketplace blocker (resolved by the rename):** `bibek.focusd` was already listed for https://github.com/BibekBhusal0/omarchy-focusd, so this repository could not be submitted under that ID. The plugin ID is now `aven.omapomodorchy` (verified free in the live catalog), which resolves the blocker. The marketplace treats plugin IDs as global and permanent.
 
 **Issue title:** `[Plugin]: OmaPomodorchy`
 

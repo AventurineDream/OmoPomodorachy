@@ -91,7 +91,7 @@ check("empty is not a break", M.isBreakSession("") === false);
 
 // --- breatherCommand argv ---
 const bc = M.breatherCommand("478", 5);
-check("breatherCommand argv", bc[0] === "omarchy-shell" && bc[1] === "shell" && bc[2] === "summon" && bc[3] === "luotao.zen");
+check("breatherCommand argv", bc[0] === "omarchy-shell" && bc[1] === "shell" && bc[2] === "summon" && bc[3] === "aven.terminal-breather");
 const payload = JSON.parse(bc[4]);
 check("breatherCommand payload pattern", payload.pattern === "478");
 check("breatherCommand payload minutes", payload.minutes === 5);
