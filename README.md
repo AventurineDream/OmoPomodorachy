@@ -1,223 +1,111 @@
 # OmaPomodorchy
 
-A beautiful [Focusd](https://github.com/BibekBhusal0/focusd) pomodoro timer for the Omarchy bar. Shows the current session and remaining time with a state icon, and opens a control panel with pause, skip, and stop actions plus your streak, sessions, history, and daily goal.
+An Omarchy bar interface for [Focusd](https://github.com/BibekBhusal0/focusd), the Pomodoro timer. Start and steer focus sessions without leaving the shell, then review the work in Focusd's history, streaks, goals, and statistics.
 
-Pairs with [Terminal-Breather](https://github.com/AventurineDream/Terminal-Breather) — when a break starts, the Breather overlay opens with your break pattern. Install both with one command each (see Install below).
+Optional integration with [Terminal Breather](https://github.com/AventurineDream/Terminal-Breather) can start a guided breathing session when a break begins.
 
-![Focusd preview](preview.png)
+![OmaPomodorchy panel with timer controls, progress, and duration presets](screenshots/panel.png)
 
-## Why Another Pomodoro Timer
+![OmaPomodorchy bar widget with current session state](screenshots/bar-widget.png)
 
-At the time of making this there are already two, similar plugin for omarchy in marketplace, but what does focusd do different than other plugins. First thing focusd is not just omarchy plugin, it's a TUI with features like streak, history, stats, and more. This plugin is just integration of omarchy with focusd. And to answer the question of how this differs from other plugin, focusd has TUI which is in-sync with bar, and other lovely features like goal, history, streak.
+![Breather handoff settings: enable the link and choose a break pattern](screenshots/breather-settings.png)
 
-## Features
+## Highlights
 
-- Bar widget showing session state and remaining time
-- Control panel with pause, skip, reset, and add 5 minutes
-- Session progress dots showing current position in the pomodoro cycle
-- Info page with links to GitHub, settings TUI, and stats TUI
-- Automatic update checking for AUR installations
-- Streak, daily goal, and sessions today from Focusd history
-- Duration sliders for the active preset's work, short break, and long break (work 5–90 min, short break 1–30, long break 5–60)
-- Customizable state icons
-- Switchable popup style (linear hero or circular face)
-- Full keyboard navigation support
-
-## Requirements
-
-- Omarchy quattro
-- [Focusd](https://github.com/BibekBhusal0/focusd) v0.2.1+ (auto-installed on first use with SHA256 verification, or install from AUR: `yay -S focusd`)
+- Live work, short-break, and long-break state with remaining time and cycle progress.
+- Timer controls for pause, skip, reset, and adding five minutes.
+- Focusd streak, daily goal, sessions today, and focus history.
+- Editable work-block tags, queued tag schedules, and named duration presets.
+- Optional Markdown or CSV export of completed, tagged work blocks.
+- Adjustable work and break lengths, round limits, state icons, and linear or circular progress.
+- Optional chime and Terminal Breather handoff for breaks.
+- `ompo`, a plain-text terminal shortcut for status and timer control, including over SSH.
 
 ## Install
+
+Requires Omarchy Quattro and [Focusd 0.2.1 or later](https://github.com/BibekBhusal0/focusd). The plugin can install Focusd on first use with SHA-256 verification; alternatively install the AUR package with `yay -S focusd`. Python 3 is required for the duration-preset editor.
 
 ```bash
 omarchy plugin add https://github.com/AventurineDream/OmoPomodorachy.git --enable
 ```
 
-## Demo
-
-![Focusd Demo](demo.gif)
-
-## Usage
-
-Click the bar widget to open the control panel. Right-click skips to the next session, middle-click resets the current timer. The info button (i icon) at the bottom opens settings and stats access. You can also bind it to a key (`~/.config/hypr/bindings.lua`):
-
-```lua
-o.bind("CTRL", "T", "exec, omarchy-shell shell summon bibek.focusd")
-```
-
-Start the timer with `ompo start` (or `focusd -s` — `focusd start` is not a focusd subcommand). Press Escape in the info page to return to the timer page.
-
-### Terminal shortcut (`ompo`)
-
-A one-word launcher for the terminal — handy over SSH, where the bar widget and panel are on the machine's own displays and you cannot see them from the phone. Same idea as `tb` for Terminal-Breather. Install it once:
-
-```bash
-cp cli/ompo ~/.local/bin/
-chmod +x ~/.local/bin/ompo
-```
-
-Then type `ompo` and press Enter to see the timer — session, state, time left, cycle, next session, and today's focus — as plain text that reads fine on a phone terminal:
-
-```bash
-ompo                # Work · paused — 24:13 left, cycle 2/4
-ompo start          # resume the paused session, or start the current one
-ompo start work     # start a fresh work session
-ompo pause          # pause the running session
-ompo resume         # resume the paused session
-```
-
-`ompo start` resumes a paused session (so its remaining time is kept — a fresh `focusd -s` would restart it from the full length) and only starts a fresh session when nothing is running. A named session (`ompo start work`) always starts fresh, even when paused. `ompo pause` and `ompo resume` are no-ops with a message when there is nothing to pause or resume. Run the checks with `python3 test/ompo.test.py` — they run the script against a stub `focusd`, so they never touch a live timer.
-
-## Configuration
-
-The timer panel has duration sliders for the active preset's work, short break, and long break (work 5–90 min, short break 1–30, long break 5–60). They edit the active preset in Focusd's `~/.config/focusd/config.toml` — the same place `focusd settings` edits — and a change takes effect from the next session of that type, never mid-session. If you change durations in the Focusd TUI, the sliders pick them up within a few seconds. (Durations used to be set in Focusd itself only; the sliders are this fork's addition.) The sliders need `/usr/bin/python3` (present on Omarchy); if a slider change snaps back instead of sticking, that is the first thing to check. The panel also has a tag picker for work blocks ("Tag this block") — tap a category before or during a block, and the block is recorded with that tag when it ends; the Last row lets you fix the tag of the block that just ended.
-
-The plugin's options live in `~/.config/omarchy/focusd.json` (watched live, so edits apply instantly).
-
-Default configuration:
-
-```json
-{
-  "progressBarStyle": "linear",
-  "icons": {
-    "work": "",
-    "work-paused": "󰏤",
-    "short-break": "",
-    "short-break-paused": "󰏤",
-    "long-break": "󰒲",
-    "long-break-paused": "󰏤"
-  }
-}
-```
-
-`progressBarStyle` switches the popup between the `linear` and `circular`:
-
-```json
-{ "progressBarStyle": "circular" }
-```
-
-`icons` overrides the per-state bar icons. Any of the keys above can be replaced:
-
-`sounds` plays a gentle chime when one session ends and the next begins (a work session running out, or a break ending). It stays silent on pause, resume, and stop, and on a manual start after a stop. Skipping to the next session also ends the current one, so it chimes too — as long as the session was running; skipping from a paused session stays silent. On by default; set it to `false` to turn it off. `soundFile` picks the chime — a bare filename is resolved into the freedesktop sound theme (`complete.oga` by default), a full path is used as-is (`~` is not expanded, so write the path out):
-
-```json
-{ "sounds": true, "soundFile": "complete.oga" }
-```
-
-`breakPattern` links the timer to Terminal-Breather: when a break starts, the Breather overlay opens with that pattern, for the break's remaining time (rounded down, so it ends a little before the break). Any pattern works — the built-ins (`box`, `478`, `coherent`) and your customs from `~/.config/omarchy/zen/patterns.json` (for example `slow-6`, `calm-466`, `breath-of-fire`); a name that doesn't exist falls back to `box` inside the Breather, silently. It launches once per break, on the first poll where the break is running — a break that starts paused waits until you resume it, and pausing mid-break doesn't relaunch it. Set it to `""` to turn the link off. The panel's Breather section has two toggles and a pattern picker for the same link: `breatherEnabled` (the master switch), `breatherAutoLaunch` (open it automatically when a break starts), and a "Pattern" dropdown listing the built-ins plus your customs from `patterns.json`. All three are on by default (pattern `"box"`), so nothing changes until one is flipped — and flipping a toggle off keeps the pattern, so flipping it back on resumes launching. The picker is disabled while the link is off. With auto-launch off, open the Breather yourself with `tb`. Turning auto-launch on mid-break launches for the rest of that break:
-
-```json
-{ "breakPattern": "478" }
-```
-
-```json
-{ "breatherEnabled": true, "breatherAutoLaunch": true }
-```
-
-`rounds` stops the timer after that many work sessions in a run — set it to `4` and the timer stops after the fourth work session ends (the break is left paused, so it will not auto-start the next work session; resuming the break still opens the Breather). The panel shows the run's progress ("Rounds: 2 / 4 done"). `0` (the default) means off — run without a limit. A skipped work session counts as a round, the same way it counts for the chime. The count is in-memory: it resets when a run completes, when the daemon restarts, when the shell restarts, and when the day changes (sessions_today drops) — so a run stopped partway through yesterday starts fresh today, but stopping partway through a run and coming back later the same day picks up where it left off. Set it in the panel (Durations section, "Rounds" slider, 0–12, 0 is off) or in `focusd.json`:
-
-```json
-{ "rounds": 4 }
-```
-
-`tags` is the list of categories for work blocks, shown as a picker in the panel ("Tag this block"). Tap one before (or during) a work block and the block is recorded with that tag when it ends. The panel also shows the last completed block ("Last: Art · 25 min · 2026-11-11") — tap its tag to cycle it, if the block that just ended was something else. Completed blocks are recorded in `~/.config/omarchy/focusd-sessions.json` (one `{ date, tag, minutes }` entry per block, compact JSON on one line), which is the source the Obsidian sync (Phase 6) exports from. A block that runs out is logged at its full length; a skipped block is logged with the minutes actually spent, measured from the work length when the block started (changing the work slider mid-block does not mis-measure it). The log is read on the 10s poll with a 1 MiB cap, and a block is only written when the last read succeeded — if the read ever fails, the block is dropped rather than risking the log, and a retag is skipped the same way. The default list is `Work`, `Study`, `Art`, `Admin`, `Other` — set your own in `focusd.json`:
-
-```json
-{ "tags": ["Work", "Study", "Art", "Admin", "Other"] }
-```
-
-`focusLogPath` is where the session log export goes — a generated record of every completed work block, regenerated whole from the sessions log every time a block ends or a block is retagged, so a retag in the panel updates the row too. The path may point **anywhere**, not only an Obsidian vault: a note, a plain folder, a spreadsheet. The format follows the file extension — a path ending in `.csv` writes CSV (`Date,Tag,Minutes,Source`, one row per block, the Source column marking the file as generated by OmaPomodorchy), anything else writes the Markdown table. Tags starting with `=`, `+`, `-`, `@`, tab, or carriage return are prefixed with a single quote in the CSV, so a spreadsheet treats them as text instead of running them as a formula. The parent folder is created if it is missing. The export is **off by default** — nothing is written until a path is set. To turn it on, set the path; an existing file at that path is only replaced when it starts with the generated header (the Markdown marker, or the `Date,Tag,Minutes,Source` header row for CSV), so a hand-written file there — including a plain `Date,Tag,Minutes` CSV — is left alone. Do not hand-edit the generated rows — the next block would overwrite them:
-
-```json
-{ "focusLogPath": "/home/aven/Projects/Obsidian/Home/20_Practices/Focus/Focus Log.md" }
-```
-
-```json
-{ "focusLogPath": "/home/aven/focus-log.csv" }
-```
-
-```json
-"bar": {
-  "layout": {
-    "right": [
-      {
-        "id": "bibek.focusd",
-        "icons": {
-          "work": "🍅",
-          "work-paused": "",
-          "short-break": "☕",
-          "short-break-paused": "",
-          "long-break": "🏖️",
-          "long-break-paused": ""
-        }
-      }
-    ]
-  }
-}
-```
-
-Alternatives per state (pick the ones you like; `-paused` variants reuse the same pause icon or keep it same because the opacity is decreased):
-
-| Key           | Suggestions   |
-| ------------- | ------------- |
-| `work`        | 󰅐, 󰀠, 🍅,    |
-| `short-break` | ☕, 🍪, ,   |
-| `long-break`  | 🏖️, ⏳, 🌴, 󰒲 |
-| `paused`      | 󰏦, 󰏥, , 󰏤    |
-
-## Uninstall
+Remove the plugin with:
 
 ```bash
 omarchy plugin remove bibek.focusd
 ```
 
-## Credits
+## Use the timer
 
-Bar widget and panel design adapted from [Omadoro](https://github.com/brianblakely/omadoro) by Brian Blakely, licensed under the MIT License.
+Click the bar widget to open the panel. Use the controls to pause, skip, reset, or add five minutes. Right-click the widget to skip to the next session; middle-click resets the current timer. The info page links to Focusd settings and statistics.
 
-Session progress dots visualization inspired by [omarchy-pomodoro](https://github.com/rodrigojacarei/omarchy-pomodoro) by rodrigojacarei, licensed under the MIT License.
+Start Focusd from a terminal with `ompo start` or `focusd -s`. To open the panel from a Hyprland keybinding:
 
-This plugin is licensed under the [MIT License](LICENSE).
+```lua
+o.bind("CTRL", "T", "exec, omarchy-shell shell summon bibek.focusd")
+```
 
-## Others
+### Terminal shortcut
 
-Here are my other Omarchy plugins:
+Install the helper from a checkout:
 
-- [Obsidian Search](https://github.com/BibekBhusal0/omarchy-obsidian-search) - fuzzy-search your Obsidian vault
-- [Readest](https://github.com/BibekBhusal0/omarchy-readest) - fuzzy-search your Readest library
-- [Youtube Video Downloader](https://github.com/BibekBhusal0/omarchy-ytdl) - video downloads with progress and history
-- [Better Lock](https://github.com/BibekBhusal0/omarchy-better-lock) - lock screen with date/time, media and power controls
-- [Better Media](https://github.com/BibekBhusal0/omarchy-better-media) - MPRIS now-playing with playback controls
-- [Better Menu](https://github.com/BibekBhusal0/omarchy-better-menu) - fuzzy menu with app grid, calculator and web search
+```bash
+install -Dm755 cli/ompo ~/.local/bin/ompo
+```
 
-Please give a star if you find them useful!
+Then use it to inspect or control the timer:
 
-## Panel (1.13.3)
+```text
+ompo                 # Print the current session and today's focus
+ompo start           # Start, or resume a paused session
+ompo start work      # Start a fresh work session
+ompo pause
+ompo resume
+```
 
-- **Dropdowns open again (1.13.3).** Regression from 1.13.1: the panel opened, but tapping any dropdown did nothing. The flip code measured the trigger with `trigger.mapToScene(0, 0)`, a Qt 5 call Qt 6 removed, so every open threw a `TypeError` before the popup could appear. The fix measures with `trigger.mapToItem(null, 0, 0)` instead — the Qt 6 scene-mapping call, the same one the shell itself uses (Bar.qml, MultiSelect.qml); the flip rule is unchanged.
+`ompo start` preserves the remaining time when resuming. Naming a session starts it fresh. `ompo pause` and `ompo resume` report a no-op when the timer is not in the matching state.
 
-## Panel (1.13.2)
+## Configure
 
-- **Pomo panel opens again (1.13.2).** Regression from 1.13.1: the panel stopped opening entirely. The vendored `FlipDropdown.qml` uses `BorderSurface`, which lives in the shell's `qs.Ui` module — the shell's own dropdown resolves it as a sibling file in the Ui directory, but the vendored copy lives in the plugin directory and did not import `qs.Ui`, so the panel failed to load at runtime (`BorderSurface is not a type`). The fix adds the missing `import qs.Ui`; nothing else changed.
+Plugin options are stored in `~/.config/omarchy/focusd.json` and watched for changes. Focusd's timer presets live in `~/.config/focusd/config.toml`; duration edits apply to the next session of that type, not to a session already running.
 
-## Panel (1.13.1)
+| Option | Purpose |
+|---|---|
+| `progressBarStyle` | `linear` or `circular` panel progress. |
+| `icons` | Per-state bar symbols, including work, breaks, and paused states. |
+| `sounds`, `soundFile` | Enable the session-transition chime and choose its sound. |
+| `rounds` | Stop after a configured number of work sessions; `0` disables the limit. |
+| `tags` | Categories offered for work blocks. |
+| `breatherEnabled`, `breatherAutoLaunch`, `breakPattern` | Configure the optional Terminal Breather link and break pattern. |
+| `focusLogPath` | Optional generated Markdown or CSV export of completed work blocks. |
 
-- **Dropdown menus flip upward (1.13.1).** The panel's dropdowns (Durations preset, schedule preset, Breather pattern) no longer run off the bottom of the screen: the menu now opens above the trigger when there is no room below it, and below as before when there is. The shell's dropdown always opens downward with no screen clamping, so a trigger near the bottom of this panel — the Breather pattern picker sits low — opened its menu past the bottom edge of a 768px display, and the list could not scroll to reach the hidden rows (every row fit inside the menu, so there was nothing to scroll). The panel now uses a local `FlipDropdown.qml`, a verbatim copy of the shell dropdown with only the flip added, for all three dropdowns; nothing else about them changed.
+For example, enable a four-work-session run and choose a break pattern:
 
-## Panel (1.13.0)
+```json
+{
+  "rounds": 4,
+  "breatherEnabled": true,
+  "breatherAutoLaunch": true,
+  "breakPattern": "478"
+}
+```
 
-- **Breather pattern picker (1.13.0).** The panel's "Breather" section now has a "Pattern" dropdown next to the two toggles, listing the built-ins (`Box breathing`, `4-7-8`, `Coherent`) plus your customs from `~/.config/omarchy/zen/patterns.json`. Picking one writes `breakPattern` in `focusd.json`, and the next break opens the Breather with it. The picker is disabled while the Breather link is off; turning a toggle off keeps the pattern, so flipping it back on resumes launching with the same pattern.
-- **Breather settings (1.12.0).** A "Breather" section in the panel, with a chevron like Durations and "Tag this block" (the choice is remembered in `focusd.json` as `breatherExpanded`; the pattern still shows on the right when collapsed). Two toggles: "Breather link" (the master switch) and "Auto-launch on breaks" (open it automatically when a break starts). Both are on by default and persist in `focusd.json` (`breatherEnabled`, `breatherAutoLaunch`); turning one off keeps the pattern (`breakPattern`, "box" by default), so flipping it back on resumes launching. With auto-launch off, open the Breather yourself with `tb`. The toggles are mouse/touch — the panel's key catcher owns Enter/Space, so keyboard use never reaches them.
-- **Tag section collapses (1.11.0).** "Tag this block" has a chevron, like Durations; collapse it to save space. The choice is remembered in `focusd.json` (`tagsExpanded`). The current tag still shows on the right when collapsed.
-- **Schedule row fits (1.11.0).** The "Queue current tag" row and the Durations Preset row no longer overflow the panel — their dropdowns flex to the space between the buttons, so the "Save schedule…" button is visible instead of clipped off-screen. The schedule-preset dropdown is labelled, so it reads as a preset picker even before any preset is saved.
-- **Session log export (1.10.0).** Set `focusLogPath` to any absolute path to export completed blocks there, regenerated whole on every block end or retag. A `.csv` path writes CSV (`Date,Tag,Minutes,Source`); anything else writes the Markdown table. Off by default; an existing file is only replaced when it starts with the generated header.
-- **Durations collapses.** The Durations section has a chevron; collapse it to save space. The choice is remembered in `focusd.json` (`durationsExpanded`). The page also scrolls (Flickable), so the schedule area and View log are reachable with Durations expanded.
-- **Wheel scrolling (1.9.1).** The mouse wheel scrolls the page — an explicit WheelHandler moves the Flickable's content (touchpad pixel deltas when present, else 48px per wheel notch). Root cause unknown: nothing in TimerPage or Panel blocks the built-in wheel handler, so if the built-in handling ever starts working, remove the WheelHandler or the page will scroll twice per step. Drag scrolling works too.
-- **Enter in a text field (1.9.2).** Pressing Enter while typing in a text field (new tag, preset name, schedule name) no longer also toggles the timer. The panel's key catcher stands down (`blocked`) while any editor has focus, exactly as its docs require — previously Enter both added the tag and started/paused the timer.
-- **Preset menu.** The active preset is a dropdown (pomodoro first, then the rest in file order). Pick one to switch; the durations follow it from the next session of that type.
-- **Save as.** Save the current slider values as a new preset (name it, no spaces) — it is created in `config.toml` and made active.
-- **Rounds hint.** "Rounds: 0 is off." is on its own line so the Durations section fits cleanly.
-- **Tags are editable.** Each tag has a × to delete it; a text field + Add tag creates one. Deleting the current tag falls back to the first tag. Deleting a tag also drops it from the queued schedule, so a deleted tag can never jam the queue — and the block-end advance skips any tag that is no longer a category.
-- **Tag schedule.** "Up next" queues tags for upcoming blocks, in order — when a block ends, the next queued tag becomes the current tag. Queue the current tag, remove queued tags with ×, save the queue as a named preset, and load a saved preset from the dropdown. A loaded preset can be deleted with the × next to the dropdown (saving refuses a duplicate name, so delete is the way to replace a preset). If a tag or schedule write is refused (config not ready), the panel says so.
-- **View log.** Opens the log of completed blocks — the session export when a path is set (Markdown table or CSV, wherever you pointed it), otherwise the sessions log. The file path is URI-encoded, so a space (as in "Focus Log.md") opens correctly.
+Choose tags in the panel before or during a work block. The plugin records completed blocks locally; setting `focusLogPath` additionally exports them. CSV is selected by a `.csv` extension. The export is off by default; a non-empty existing file is replaced only when it has the plugin's generated-file marker/header. Empty files are treated as interrupted exports and may be replaced, so a failed first write can recover. On block end, the source log is re-read and validated; malformed or over-1-MiB files are preserved and reported instead of being overwritten. Repair the source log before further blocks can be recorded. Do not edit generated export rows by hand, since they are rebuilt from the session history.
+
+## Screenshots
+
+![Timer panel with session controls and progress](screenshots/panel.png)
+
+## Development
+
+Run the terminal-helper and model checks:
+
+```bash
+python3 test/ompo.test.py
+node test/FocusdModel.test.js
+node test/write-config.test.js
+```
+
+## Credits and license
+
+OmaPomodorchy is a fork of Bibek Bhusal's Focusd Omarchy integration. The bar widget and panel design were adapted from [Omadoro](https://github.com/brianblakely/omadoro); the session-progress dots were inspired by [omarchy-pomodoro](https://github.com/rodrigojacarei/omarchy-pomodoro). Both projects are MIT-licensed. See [LICENSE](LICENSE) for this repository's license and attribution.
