@@ -32,7 +32,7 @@ omarchy plugin add https://github.com/AventurineDream/OmoPomodorachy.git --enabl
 Remove the plugin with:
 
 ```bash
-omarchy plugin remove bibek.focusd
+omarchy plugin remove aven.omapomodorchy
 ```
 
 ## Use the timer
@@ -42,7 +42,7 @@ Click the bar widget to open the panel. Use the controls to pause, skip, reset, 
 Start Focusd from a terminal with `ompo start` or `focusd -s`. To open the panel from a Hyprland keybinding:
 
 ```lua
-o.bind("CTRL", "T", "exec, omarchy-shell shell summon bibek.focusd")
+o.bind("CTRL", "T", "exec, omarchy-shell shell summon aven.omapomodorchy")
 ```
 
 ### Terminal shortcut

@@ -77,7 +77,7 @@ function isBreakSession(sessionKey) {
 // it. A missing Breather plugin makes the summon a silent no-op.
 function breatherCommand(pattern, minutes) {
   return [
-    "omarchy-shell", "shell", "summon", "luotao.zen",
+    "omarchy-shell", "shell", "summon", "aven.terminal-breather",
     JSON.stringify({ pattern: pattern, minutes: minutes })
   ]
 }
