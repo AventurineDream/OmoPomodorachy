@@ -85,6 +85,9 @@ Item {
   // the other sliders may hold stale values, and passing those in would
   // write them back over a TUI change to a different key.
   property bool pendingWrite: false
+  // Bumped on every queued write to focusd's config.toml. A durations read
+  // that started before a bump may predate that write, so it is discarded.
+  property int focusdWriteSeq: 0
   property string pendingWriteKind: ""
   property int pendingWriteValue: 0
   // A preset switch or Save As is waiting on a fresh re-read of the
@@ -93,6 +96,8 @@ Item {
   // pendingPresetArg is the preset name.
   property string pendingPresetOp: ""
   property string pendingPresetArg: ""
+  // The preset a pending pick replaced; put back if its fresh read fails.
+  property string pendingPresetPrev: ""
 
   // Rounds before stop (Phase 4). `rounds` is how many work sessions run
   // before the timer stops (0 = off, unlimited); `roundsCompleted` is how
@@ -135,12 +140,15 @@ Item {
   property bool sessionsApplied: false
   // The log has its own 1 MiB read cap (matching write-config's), not the
   // 64 KiB config cap: compact entries are ~50 bytes, so 1 MiB is years
-  // of blocks. sessionsLoadedOk is true only when the last read
-  // succeeded — a failed read (overflow, timeout) must never be treated
-  // as an empty log, or the next block-end write would replace the whole
-  // history with one entry. Writes are skipped while it is false.
+  // of blocks. A failed read (overflow, timeout) must never be treated as
+  // an empty log. sessionsLoadedOk is true only when the last read
+  // succeeded; it gates the Focus Log export, which is regenerated from
+  // sessionsRaw. The sessions log itself is written only from a fresh read
+  // (see queueSessionEdit).
   readonly property int sessionsMaxBytes: 1048576
   property bool sessionsLoadedOk: false
+  // Edits waiting for a fresh read of the sessions log (queueSessionEdit).
+  property var sessionsEdits: []
   // Obsidian sync (Phase 6). The vault Focus Log is a generated table
   // of every completed work block, regenerated whole from the sessions
   // log on every write (so a retag updates the vault row too). The sync
@@ -252,35 +260,83 @@ Item {
       root.focusLogPath = String(fl);
   }
 
-  // Rewrite the Focus Log export from the in-memory sessions log. The
-  // whole export is regenerated each time (never appended), so a retag
-  // updates the row. Nothing is written while the log is unloaded or
-  // the sync is off — an export must never come from a stale view — and
+  // Every write-config call goes through one Process (configWriteProc),
+  // one write at a time, in queue order. The content is never an argv
+  // element: Linux refuses a single argument of 128 KiB or more (E2BIG),
+  // and the sessions log and Focus Log grow to the 1 MiB write-config
+  // accepts. The content goes to stdin, framed by Model.writeConfigInput,
+  // and is written from onStarted (a write before the process starts is
+  // lost). Stdin is not closed: write-config stops at the byte count, and
+  // on Quickshell 0.3.2 a large write does not reliably reach EOF once
+  // stdinEnabled is cleared. A write that runs past writeTimeoutMs is
+  // killed, so one stuck write cannot hold the queue. A failed write is
+  // logged (console.warn) unless the job brings its own onExit.
+  // writePending(path) is true while a write to that path is queued or
+  // running. The loaders wait for it, so a poll never reads back the
+  // file's older text and then writes from it.
+  property int writeTimeoutMs: 15000
+  property var writeQueue: []
+  property var activeWrite: null
+  function queueWrite(path, command, content, onExit) {
+    root.queueFramedWrite(path, command, Model.writeConfigInput(content), onExit);
+  }
+  // queueWrite for input already framed: Model.writeConfigInput for one
+  // frame, Model.writeConfigGuardedInput for the sessions log's guarded pair.
+  function queueFramedWrite(path, command, input, onExit) {
+    if (path === root.focusdConfigPath)
+      root.focusdWriteSeq++;
+    root.writeQueue.push({ path: path, command: command, input: input, onExit: onExit || null, timedOut: false });
+    root.drainWrites();
+  }
+  function writePending(path) {
+    if (root.activeWrite && root.activeWrite.path === path)
+      return true;
+    for (var i = 0; i < root.writeQueue.length; i++) {
+      if (root.writeQueue[i].path === path)
+        return true;
+    }
+    return false;
+  }
+  function drainWrites() {
+    if (configWriteProc.running || root.writeQueue.length === 0)
+      return;
+    root.activeWrite = root.writeQueue.shift();
+    configWriteProc.command = root.activeWrite.command;
+    configWriteProc.running = true;
+    writeWatchdog.restart();
+  }
+
+  // Rewrite the Focus Log export from sessionsRaw, the sessions log as the
+  // last applied edit or read left it. Only applySessionBatch calls this,
+  // after an edit was applied to a fresh read, so the export never comes
+  // from an unread view. The whole export is regenerated each time (never
+  // appended), so a retag updates the row. Nothing is written while the log
+  // is unloaded or the sync is off, and
   // an existing file is only replaced when it starts with the generated
   // header, so a hand-written file at that path is left alone. The
   // format follows the path's extension: .csv writes CSV, anything else
   // writes the Markdown table. The path may point anywhere, not only
-  // the vault. The write runs through focusLogWriteProc (not
-  // execDetached) so the exit code is visible: 0 is a successful write,
-  // FOCUS_LOG_GUARD_SKIP_EXIT (2) is the overwrite guard skipping a
-  // hand-written file, and anything else is a failed write. A skip logs
-  // a console.warn with the target path and the reason — no file
-  // contents, no new log file.
-  property string focusLogWritePath: ""
+  // the vault. The write is queued (queueWrite); its exit code tells a
+  // guard skip (FOCUS_LOG_GUARD_SKIP_EXIT, 2) from a failed write.
   function writeFocusLog() {
     if (!root.focusLogPath || !root.sessionsLoadedOk)
-      return;
-    if (focusLogWriteProc.running)
       return;
     var text = Model.focusLogFormat(root.focusLogPath) === "csv"
       ? Model.focusLogCsvText(root.sessionsRaw)
       : Model.focusLogText(root.sessionsRaw);
-    var cmd = Model.focusLogCommand(root.writeScriptPath, root.focusLogPath, text);
+    var path = root.focusLogPath;
+    var cmd = Model.focusLogCommand(root.writeScriptPath, path);
     if (!cmd)
       return;
-    root.focusLogWritePath = root.focusLogPath;
-    focusLogWriteProc.command = cmd;
-    focusLogWriteProc.running = true;
+    root.queueWrite(path, cmd, text, function (ok, exitCode, timedOut) {
+      if (ok)
+        return;
+      if (!timedOut && exitCode === Model.FOCUS_LOG_GUARD_SKIP_EXIT) {
+        console.warn(Model.focusLogSkipMessage(path));
+        return;
+      }
+      console.warn("Focusd: Focus Log write failed for " + path + " (" + (timedOut ? "timed out" : "exit " + exitCode) + ")");
+    });
   }
   property var fileConfig: ({})
   function parseFileConfig(raw) {
@@ -314,7 +370,7 @@ Item {
   }
 
   function loadConfig() {
-    if (configProc.running)
+    if (configProc.running || root.writePending(root.focusdJsonPath))
       return;
     configProc.collected = "";
     configProc.collectedBytes = 0;
@@ -382,7 +438,7 @@ Item {
     var updated = Model.setJsonKey(JSON.stringify(cfg), key, value);
     root.configRaw = updated;
     root.fileConfig = cfg;
-    Quickshell.execDetached(["bash", root.writeScriptPath, "--create", root.focusdJsonPath, updated]);
+    root.queueWrite(root.focusdJsonPath, ["bash", root.writeScriptPath, "--create", root.focusdJsonPath], updated);
     return true;
   }
 
@@ -554,12 +610,12 @@ Item {
   }
 
   // Open the log of completed blocks: the Obsidian Focus Log when the
-  // sync path is set, otherwise the sessions log itself. The path is
-  // URI-encoded: a space (as in "Focus Log.md") would otherwise break
-  // the file:// URL.
+  // sync path is set, otherwise the sessions log itself. The URL comes
+  // from Model.fileUrl, which escapes spaces and also "#" and "?" (those
+  // would otherwise start the URL's fragment and query).
   function openLog() {
     var p = root.focusLogPath || root.sessionsPath;
-    Qt.openUrlExternally(encodeURI("file://" + p));
+    Qt.openUrlExternally(Model.fileUrl(p));
   }
 
   Timer {
@@ -597,7 +653,7 @@ Item {
   // TUI shows up here within a poll. An unparseable file keeps the last
   // good values.
   function loadDurations() {
-    if (durationsProc.running)
+    if (durationsProc.running || root.writePending(root.focusdConfigPath))
       return;
     durationsProc.collected = "";
     durationsProc.collectedBytes = 0;
@@ -605,6 +661,7 @@ Item {
     durationsProc.timedOut = false;
     durationsProc.command = ["bash", root.readScriptPath, root.focusdConfigPath, String(root.maxConfigBytes)];
     durationsWatchdog.restart();
+    durationsProc.readSeq = root.focusdWriteSeq;
     durationsProc.running = true;
   }
 
@@ -621,6 +678,8 @@ Item {
       var arg = root.pendingPresetArg;
       var kind = root.pendingWriteKind;
       var value = root.pendingWriteValue;
+      var prev = root.pendingPresetPrev;
+      root.pendingPresetPrev = "";
       root.pendingPresetOp = "";
       root.pendingPresetArg = "";
       root.pendingWrite = false;
@@ -647,23 +706,40 @@ Item {
             updated = saved;
         }
         if (updated !== next) {
-          root.durationsRaw = updated;
           // Run through bash explicitly: the script's executable bit does
           // not survive a push through the GitHub API, and bash reads it
           // either way.
-          Quickshell.execDetached(["bash", root.writeScriptPath, root.focusdConfigPath, updated]);
+          root.queueWrite(root.focusdConfigPath, ["bash", root.writeScriptPath, root.focusdConfigPath], updated);
         }
+        // Show the written state now: the write lands asynchronously, and
+        // the panel binds to the presets, the active preset and the lengths.
+        applyParsedDurations(updated);
+      } else if (prev !== "") {
+        // The fresh read failed, so the pick did not land: show the preset the
+        // file had. A failed write is different: the next poll snaps it back.
+        root.activePreset = prev;
       }
+      // Force the next poll to re-read and re-apply. The file may not hold
+      // `updated` yet, and a failed write or read must snap the panel back
+      // to the file's values, which only a re-apply does.
+      root.durationsRaw = "";
       return;
     }
     if (next === root.durationsRaw && root.durationsApplied)
       return;
     root.durationsRaw = next;
     root.durationsApplied = true;
-    var parsed = Model.parseDurations(next);
+    applyParsedDurations(next);
+  }
+
+  // Set the Durations state from focusd's config.toml text: the preset list,
+  // the active preset and its three lengths. Unparseable text keeps the last
+  // good values.
+  function applyParsedDurations(text) {
+    var parsed = Model.parseDurations(text);
     if (!parsed)
       return;
-    root.presets = Model.listPresets(next);
+    root.presets = Model.listPresets(text);
     root.activePreset = parsed.preset;
     root.workMinutes = parsed.work;
     root.shortBreakMinutes = parsed.shortBreak;
@@ -681,6 +757,11 @@ Item {
       return;
     if (String(name) === root.activePreset)
       return;
+    // The picker follows activePreset, so the pick shows now. The fresh read
+    // decides whether it sticks; a failed read puts the old preset back.
+    if (root.pendingPresetOp !== "setPreset")
+      root.pendingPresetPrev = root.activePreset;
+    root.activePreset = String(name);
     root.pendingPresetOp = "setPreset";
     root.pendingPresetArg = String(name);
     root.loadDurations();
@@ -737,12 +818,16 @@ Item {
   // exits 0 with no output for it, so it reads as success and the file
   // is created on the first block (write-config --create). A failed read
   // (overflow, timeout) keeps the last good log and clears
-  // sessionsLoadedOk, so no write can clobber the file from a stale view.
+  // sessionsLoadedOk. An edit never writes from that log: it is applied to
+  // a fresh read, and dropped with a warning when that read fails.
   function loadSessions() {
-    if (sessionsProc.running)
+    if (sessionsProc.running || root.writePending(root.sessionsPath))
       return;
-    sessionsProc.collected = "";
-    sessionsProc.collectedBytes = 0;
+    // Edits queued before this read starts are its batch: the read is fresh
+    // from this moment, and the batch is applied to its text.
+    sessionsProc.batch = root.sessionsEdits;
+    root.sessionsEdits = [];
+    sessionsProc.stderrBytes = 0;
     sessionsProc.overflowed = false;
     sessionsProc.timedOut = false;
     sessionsProc.command = ["bash", root.readScriptPath, root.sessionsPath, String(root.sessionsMaxBytes)];
@@ -750,12 +835,20 @@ Item {
     sessionsProc.running = true;
   }
 
+  // Show a sessions log text in the panel: the in-memory copy, its entries
+  // and the Last block (null when the text holds no valid entry).
+  function showSessions(text) {
+    root.sessionsRaw = text;
+    root.sessionLog = Model.parseSessionLog(text);
+    root.lastWorkSession = root.sessionLog.length ? root.sessionLog[root.sessionLog.length - 1] : null;
+  }
+
   function applySessions(ok, raw) {
     if (!ok) {
       // The read failed (overflow, timeout, or an I/O error). Keep the
       // last good log exactly as it is — do not treat the failure as an
-      // empty log — and mark the log unloaded so no write runs until a
-      // read succeeds again.
+      // empty log — and mark the log unloaded so the Focus Log is not
+      // exported until a read succeeds again.
       root.sessionsLoadedOk = false;
       return;
     }
@@ -763,11 +856,91 @@ Item {
     var next = String(raw || "");
     if (next === root.sessionsRaw && root.sessionsApplied)
       return;
-    root.sessionsRaw = next;
     root.sessionsApplied = true;
-    var log = Model.parseSessionLog(next);
-    root.sessionLog = log;
-    root.lastWorkSession = log.length ? log[log.length - 1] : null;
+    root.showSessions(next);
+  }
+
+  // Sessions log edits: the block-end append and the Last-row retag. An edit
+  // is never written from sessionsRaw. It waits in sessionsEdits until a read
+  // of the file starts (loadSessions, which first waits out any read or write
+  // already running), and that read's text is what the edits are applied to
+  // (applySessionBatch). Anything that changed the file since the last poll
+  // is therefore kept, and a change made after that read is kept by the
+  // guarded write (queueSessionsWrite).
+  function queueSessionEdit(edit) {
+    root.sessionsEdits.push(edit);
+    root.runSessionEdits();
+  }
+  function runSessionEdits() {
+    if (root.sessionsEdits.length > 0)
+      root.loadSessions();
+  }
+
+  // Applies a read's batch of edits to the text that read returned, and
+  // writes the result once. A failed read applies and writes nothing: each
+  // edit is dropped with a warning, and the panel goes back to the last log
+  // read. A skipped edit (Model.applySessionEdit) is warned about; the edits
+  // after it still apply to the text they were given.
+  function applySessionBatch(batch, ok, text) {
+    if (!ok) {
+      for (var i = 0; i < batch.length; i++)
+        console.warn(Model.sessionEditSkipMessage(root.sessionsPath, batch[i], "could not read the file"));
+      root.showSessions(root.sessionsRaw);
+      return;
+    }
+    var next = text;
+    var applied = [];
+    for (var j = 0; j < batch.length; j++) {
+      var result = Model.applySessionEdit(next, batch[j], root.sessionsMaxBytes);
+      if (result.skip) {
+        console.warn(Model.sessionEditSkipMessage(root.sessionsPath, batch[j], result.skip));
+        continue;
+      }
+      next = result.text;
+      applied.push(batch[j]);
+    }
+    root.showSessions(next);
+    if (applied.length === 0)
+      return;
+    if (next === text) {
+      root.writeFocusLog();
+      return;
+    }
+    // The export is regenerated only once the sessions write has landed. A
+    // refused or killed write must not leave a block in the export that the
+    // sessions log lacks.
+    root.queueSessionsWrite(text, next, applied, function (ok) {
+      if (ok)
+        root.writeFocusLog();
+    });
+  }
+
+  // Writes the edited sessions log through the write queue as a guarded
+  // write (write-config --create --expect). base is the text the edits were
+  // applied to (the batch's read) and text is the result: write-config
+  // replaces the file only while it still holds base. On a conflict (exit
+  // SESSIONS_CHANGED_EXIT) nothing is written and the edits go back to the
+  // front of the queue to be applied to a fresh read, up to a limit
+  // (retrySessionEdits). Any other failure is warned about; the next read
+  // shows the disk. onDone(ok), when given, runs once the write has finished,
+  // before queued edits resume.
+  function queueSessionsWrite(base, text, edits, onDone) {
+    var path = root.sessionsPath;
+    root.queueFramedWrite(path, ["bash", root.writeScriptPath, "--create", "--expect", path], Model.writeConfigGuardedInput(base, text), function (ok, exitCode, timedOut) {
+      if (!ok && !timedOut && exitCode === Model.SESSIONS_CHANGED_EXIT) {
+        var r = Model.retrySessionEdits(edits);
+        for (var i = 0; i < r.dropped.length; i++)
+          console.warn(Model.sessionEditSkipMessage(path, r.dropped[i], "the file kept changing, gave up after " + Model.SESSION_EDIT_MAX_CONFLICTS + " conflicts"));
+        for (var k = 0; k < r.retry.length; k++)
+          console.warn(Model.sessionEditSkipMessage(path, r.retry[k], "the file changed after it was read, retrying from the file"));
+        root.sessionsEdits = r.retry.concat(root.sessionsEdits);
+      } else if (!ok) {
+        console.warn("Focusd: sessions log write failed for " + path + " (" + (timedOut ? "timed out" : "exit " + exitCode) + ")");
+      }
+      if (onDone)
+        onDone(ok);
+      root.runSessionEdits();
+    });
   }
 
   // Block tagging: pick the tag for the current/next work block.
@@ -777,21 +950,19 @@ Item {
   }
 
   // Fix the last completed block's tag afterwards: cycle it to the next
-  // category and rewrite the log. Nothing to fix when no block has
-  // completed yet, and nothing is written while the log is unloaded (a
-  // failed read) — a retag must never rewrite the file from a stale view.
+  // category. The edit names the block the panel shows and is applied only
+  // if that block is still the last one on disk. Nothing to fix when no
+  // block has completed yet, or there is no other tag to cycle to.
   function cycleLastTag() {
-    if (!root.lastWorkSession || !root.sessionsLoadedOk)
+    var shown = root.lastWorkSession;
+    if (!shown)
       return;
-    var next = Model.nextTag(root.tags, root.lastWorkSession.tag);
-    var logText = Model.retagSessionLog(root.sessionsRaw, next);
-    if (logText === null)
+    var next = Model.nextTag(root.tags, shown.tag);
+    if (!next)
       return;
-    root.sessionsRaw = logText;
-    root.sessionLog = Model.parseSessionLog(logText);
-    root.lastWorkSession = root.sessionLog.length ? root.sessionLog[root.sessionLog.length - 1] : null;
-    Quickshell.execDetached(["bash", root.writeScriptPath, "--create", root.sessionsPath, logText]);
-    root.writeFocusLog();
+    root.queueSessionEdit({ kind: "retag", tag: next, expect: { date: shown.date, tag: shown.tag, minutes: shown.minutes } });
+    // The panel shows the new tag at once; the log settles on the next read.
+    root.lastWorkSession = { date: shown.date, tag: next, minutes: shown.minutes };
   }
 
   Timer {
@@ -801,8 +972,6 @@ Item {
     onTriggered: {
       if (sessionsProc.running) {
         sessionsProc.timedOut = true;
-        sessionsProc.collected = "";
-        sessionsProc.collectedBytes = 0;
         root.killProc(sessionsProc);
       }
     }
@@ -827,6 +996,7 @@ Item {
     property int collectedBytes: 0
     property bool overflowed: false
     property bool timedOut: false
+    property int readSeq: 0
     stdout: SplitParser {
       onRead: function (data) {
         if (durationsProc.overflowed || durationsProc.timedOut)
@@ -864,41 +1034,38 @@ Item {
       durationsProc.collectedBytes = 0;
       durationsProc.overflowed = false;
       durationsProc.timedOut = false;
+      // A focusd write queued since this read started makes its text stale,
+      // and a write still pending makes it older than what is queued. Drop
+      // the read: the write's exit reloads the durations, and the next poll
+      // reads again.
+      if (durationsProc.readSeq !== root.focusdWriteSeq || root.writePending(root.focusdConfigPath))
+        return;
       root.applyDurations(ok, output);
     }
   }
 
   Process {
     id: sessionsProc
-    property string collected: ""
-    property int collectedBytes: 0
+    property int stderrBytes: 0
     property bool overflowed: false
     property bool timedOut: false
-    stdout: SplitParser {
-      onRead: function (data) {
-        if (sessionsProc.overflowed || sessionsProc.timedOut)
-          return;
-        var chunk = String(data + "\n");
-        if (sessionsProc.collectedBytes + chunk.length > root.sessionsMaxBytes) {
-          sessionsProc.overflowed = true;
-          sessionsProc.collected = "";
-          sessionsProc.collectedBytes = 0;
-          root.killProc(sessionsProc);
-          return;
-        }
-        sessionsProc.collected += chunk;
-        sessionsProc.collectedBytes += chunk.length;
-      }
+    property var batch: []
+    // Collected whole, exactly as the file holds it. A line splitter would
+    // add a "\n" to a last line that has none, and the guarded write compares
+    // this text byte for byte with the file. read-config already caps the
+    // output at the sessions cap, so stdout needs no overflow check.
+    stdout: StdioCollector {
+      id: sessionsOut
+      waitForEnd: true
     }
     stderr: SplitParser {
       onRead: function (data) {
         if (sessionsProc.overflowed || sessionsProc.timedOut)
           return;
-        sessionsProc.collectedBytes += String(data + "\n").length;
-        if (sessionsProc.collectedBytes > root.sessionsMaxBytes) {
+        sessionsProc.stderrBytes += String(data + "\n").length;
+        if (sessionsProc.stderrBytes > root.sessionsMaxBytes) {
           sessionsProc.overflowed = true;
-          sessionsProc.collected = "";
-          sessionsProc.collectedBytes = 0;
+          sessionsProc.stderrBytes = 0;
           root.killProc(sessionsProc);
         }
       }
@@ -906,12 +1073,16 @@ Item {
     onExited: function (exitCode) {
       sessionsWatchdog.stop();
       var ok = !sessionsProc.overflowed && !sessionsProc.timedOut && exitCode === 0;
-      var output = String(sessionsProc.collected);
-      sessionsProc.collected = "";
-      sessionsProc.collectedBytes = 0;
+      var output = String(sessionsOut.text);
+      var batch = sessionsProc.batch;
+      sessionsProc.batch = [];
+      sessionsProc.stderrBytes = 0;
       sessionsProc.overflowed = false;
       sessionsProc.timedOut = false;
       root.applySessions(ok, output);
+      if (batch.length > 0)
+        root.applySessionBatch(batch, ok, output);
+      root.runSessionEdits();
     }
   }
 
@@ -1153,21 +1324,16 @@ Item {
       // Last block in the panel. A skipped block is logged with the
       // elapsed minutes, not the full length. The block's length is
       // measured from the work length when it started, not the current
-      // slider value. Nothing is written while the log is unloaded (a
-      // failed read) — the block is dropped rather than risking the log.
-      // (The write goes through write-config --create, which creates the
-      // log file on the first block.)
+      // slider value. The log is written from a fresh read of the file
+      // (queueSessionEdit), never from the in-memory copy: a block is dropped,
+      // with a warning, only when that read or its validation fails.
+      // (write-config --create creates the log file on the first block.)
       var blockLength = root.blockStartWorkMinutes > 0 ? root.blockStartWorkMinutes : root.workMinutes;
       var blockMinutes = Model.elapsedMinutes(blockLength, root.prevRemainingSecs);
       var entry = { date: Qt.formatDate(new Date(), "yyyy-MM-dd"), tag: root.currentTag, minutes: blockMinutes };
-      if (root.sessionsLoadedOk) {
-        var logText = Model.appendSessionLog(root.sessionsRaw, entry);
-        root.sessionsRaw = logText;
-        root.sessionLog = Model.parseSessionLog(logText);
-        root.lastWorkSession = entry;
-        Quickshell.execDetached(["bash", root.writeScriptPath, "--create", root.sessionsPath, logText]);
-        root.writeFocusLog();
-      }
+      // The panel shows the block at once; the file gets it on a fresh read.
+      root.lastWorkSession = entry;
+      root.queueSessionEdit({ kind: "append", entry: entry });
       // Tag schedule: the block that just ended was tagged with the
       // current tag, so take the next scheduled tag for the block after
       // it. An empty queue leaves the current tag alone. The shift
@@ -1259,23 +1425,41 @@ Item {
     onTriggered: root.poll()
   }
 
+  // The one write-config Process (see queueWrite). Its exit is what
+  // drains the queue, so the handler must always run: a killed write
+  // exits too.
   Process {
-    id: focusLogWriteProc
-    // Runs the focusLogCommand argv (mkdir + guard + write-config). The
-    // exit code is the only signal back: 0 wrote the file, 2 is the
-    // overwrite guard skipping a hand-written file, anything else is a
-    // failed write. A skip logs a console.warn with the target path and
-    // the reason (Model.focusLogSkipMessage) — no file contents.
+    id: configWriteProc
+    stdinEnabled: true
+    onStarted: configWriteProc.write(root.activeWrite.input)
     onExited: function (exitCode) {
-      var path = root.focusLogWritePath;
-      root.focusLogWritePath = "";
-      if (exitCode === 0)
-        return;
-      if (exitCode === Model.FOCUS_LOG_GUARD_SKIP_EXIT) {
-        console.warn(Model.focusLogSkipMessage(path));
-        return;
+      writeWatchdog.stop();
+      var job = root.activeWrite;
+      root.activeWrite = null;
+      var ok = Model.writeSucceeded(exitCode, job.timedOut);
+      if (job.onExit)
+        job.onExit(ok, exitCode, job.timedOut);
+      else if (!ok)
+        console.warn("Focusd: write failed for " + job.path + " (" + (job.timedOut ? "timed out" : "exit " + exitCode) + ")");
+      root.drainWrites();
+      // A slider release or preset pick that waited on a write is applied now,
+      // not on the next 10s poll. loadDurations skips while another focusd
+      // write is still pending, and that write's exit runs this again.
+      if (root.pendingWrite || root.pendingPresetOp !== "")
+        root.loadDurations();
+    }
+  }
+
+  Timer {
+    id: writeWatchdog
+    interval: root.writeTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (configWriteProc.running) {
+        // Marked before the kill: the exit that follows can still report 0.
+        root.activeWrite.timedOut = true;
+        root.killProc(configWriteProc);
       }
-      console.warn("Focusd: Focus Log write failed for " + path + " (exit " + exitCode + ")");
     }
   }
 

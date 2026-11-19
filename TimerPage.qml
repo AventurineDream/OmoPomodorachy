@@ -405,6 +405,10 @@ Item {
             onChanged: function (v) {
               if (root.timerService)
                 root.timerService.setActivePreset(v);
+              // The picker writes its own value on a pick, which drops the
+              // binding above. Bind it again so it keeps following the service
+              // (Save as, a TUI change) instead of showing the last pick.
+              value = Qt.binding(function () { return root.timerService ? root.timerService.activePreset : "pomodoro"; });
             }
           }
 
@@ -1002,6 +1006,8 @@ Item {
             onChanged: function (v) {
               if (root.timerService)
                 root.timerService.setBreakPattern(v);
+              // Same as the preset picker: a pick drops the binding above.
+              value = Qt.binding(function () { return root.timerService ? root.timerService.breakPattern : "box"; });
             }
           }
         }

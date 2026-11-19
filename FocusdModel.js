@@ -563,9 +563,10 @@ function elapsedMinutes(workMinutes, prevRemainingSecs) {
 }
 
 // The session log: a JSON array of { date, tag, minutes } entries, one
-// per completed work block. Invalid or empty text is an empty log — a
-// corrupted file is replaced with a fresh one on the next block, rather
-// than blocking logging forever. Entries missing a field are dropped.
+// per completed work block. Invalid or empty text reads as an empty log for
+// display. Writes never start from that: applySessionEdit refuses to write
+// over text that is not a valid log, so a corrupted file is left for the
+// user to repair. Entries missing a field are dropped.
 function parseSessionLog(text) {
   var raw = String(text || "").trim()
   if (!raw) return []
@@ -592,8 +593,9 @@ function parseSessionLog(text) {
 // Append one block to the log text and return the new JSON, compact (one
 // line) so the file stays small — pretty-printing costs ~70 bytes an
 // entry and the read is capped, so compact buys years of headroom. An
-// invalid entry leaves the log unchanged; an invalid existing file is
-// replaced with a fresh log containing just this entry.
+// invalid entry leaves the log unchanged. Invalid existing text is replaced
+// by a log holding just this entry: callers that write must check the text
+// first (applySessionEdit does); this function does not.
 function appendSessionLog(text, entry) {
   var log = parseSessionLog(text)
   var date = String((entry && entry.date) || "")
@@ -621,6 +623,89 @@ function nextTag(tags, currentTag) {
   if (!list.length) return ""
   var idx = list.indexOf(currentTag)
   return list[(idx + 1) % list.length]
+}
+
+// ---- Sessions log edits ----
+/**
+ * Applies one append or retag to a fresh sessions-log snapshot without I/O.
+ * write-config compares the exact base bytes before temp creation and again
+ * before replacement; a conflict is retried from a fresh read.
+ * @param {string} freshText Exact serialized log text read from disk.
+ * @param {Object} edit `append` with an entry, or `retag` with a tag and the last block the panel showed.
+ * @param {number} maxBytes Maximum serialized log size, in UTF-8 bytes.
+ * @returns {{text: string}|{skip: string}} New compact JSON, or a reason no write is safe.
+ * @remarks The final compare and `os.replace` are separate syscalls; an external write in that tiny interval may still win.
+ */
+function applySessionEdit(freshText, edit, maxBytes) {
+  var raw = String(freshText || "").trim()
+  if (!sessionLogTextOk(raw)) return { skip: "the file is not a valid sessions log" }
+  var text
+  if (edit && edit.kind === "retag") {
+    var log = parseSessionLog(raw)
+    var last = log[log.length - 1]
+    var expect = edit.expect || {}
+    if (!last || last.date !== expect.date || last.tag !== expect.tag || last.minutes !== expect.minutes)
+      return { skip: "the last block on disk is not the block shown" }
+    if (!String(edit.tag || "")) return { skip: "no tag to set" }
+    text = retagSessionLog(raw, edit.tag)
+  } else {
+    text = appendSessionLog(raw, edit && edit.entry)
+  }
+  if (wellFormedUtf8(text).bytes > maxBytes) return { skip: "the log would pass the 1 MiB cap" }
+  return { text: text }
+}
+
+/**
+ * Checks whether sessions-log text is safe to replace.
+ * @param {string} text Serialized JSON log contents.
+ * @returns {boolean} True for empty text or a JSON array; malformed/non-array text is preserved.
+ */
+function sessionLogTextOk(text) {
+  var raw = String(text || "").trim()
+  if (!raw) return true
+  try {
+    return Array.isArray(JSON.parse(raw))
+  } catch (e) {
+    return false
+  }
+}
+
+/**
+ * Describes a skipped sessions-log edit without including file contents.
+ * @param {string} sessionsPath Destination path for the sessions log.
+ * @param {Object} edit Append or retag operation that was refused.
+ * @param {string} reason Short reason the edit could not be applied.
+ * @returns {string} Warning text suitable for the shell log.
+ */
+function sessionEditSkipMessage(sessionsPath, edit, reason) {
+  var what = edit && edit.kind === "retag" ? "tag change" : "block"
+  return "Focusd: " + what + " not saved to " + String(sessionsPath || "") + ": " + String(reason || "unknown reason") + ", nothing written"
+}
+
+// write-config's exit status for a guarded write (--expect) whose file no
+// longer holds the text the edit was built from. Nothing was written.
+var SESSIONS_CHANGED_EXIT = 3
+// A conflicted edit goes back to a fresh read, but only this many times in
+// all; after that it is dropped with a warning, so a file that keeps changing
+// cannot hold the queue forever.
+var SESSION_EDIT_MAX_CONFLICTS = 3
+/**
+ * Splits conflicted edits into retries and edits dropped after the retry cap.
+ * @param {Object[]} edits Pending append/retag edits with conflict counts.
+ * @returns {{retry: Object[], dropped: Object[]}} New arrays; input objects are copied.
+ */
+function retrySessionEdits(edits) {
+  var retry = []
+  var dropped = []
+  var list = Array.isArray(edits) ? edits : []
+  for (var i = 0; i < list.length; i++) {
+    var marked = {}
+    for (var key in list[i]) marked[key] = list[i][key]
+    marked.conflicts = (Number(list[i].conflicts) || 0) + 1
+    if (marked.conflicts < SESSION_EDIT_MAX_CONFLICTS) retry.push(marked)
+    else dropped.push(marked)
+  }
+  return { retry: retry, dropped: dropped }
 }
 
 
@@ -726,36 +811,91 @@ function focusLogText(text) {
   return out.join("\n") + "\n"
 }
 
-// The argv for writing the Focus Log export: create the parent folder if
-// it is missing, then atomically replace the file with the new export
-// (write-config --create). The path may point anywhere — an Obsidian
-// note, a plain folder, a spreadsheet — not only the vault. Paths and
-// content travel as positional arguments, quoted in the script, so a
-// path with spaces or a table with quotes is data, never syntax.
-// Returns null when the log path is not an absolute path (an empty path
-// disables the sync).
-// Overwrite guard: an existing file is only replaced when it starts with
-// the generated header — a hand-written file at that path is left alone,
-// and the write is skipped. For Markdown the marker is
-// name-independent ("This note is generated from", present in every
-// generated header), with the pre-rename string ("Sessions logged by
-// OmoPomodorachy") as a fallback, so a Focus Log written before the
-// rename is still recognised as generated and gets rewritten rather
-// than silently never updating. For CSV the marker is the format-specific
-// header row ("Date,Tag,Minutes,Source") — a plain Date,Tag,Minutes CSV
-// a user wrote by hand does not match, so it is left alone.
-// A skipped write exits with FOCUS_LOG_GUARD_SKIP_EXIT (2), not 0, so
-// the caller can tell a skip from a successful write and log it —
-// console.warn, with the target path and the reason, no file contents.
+/**
+ * Produces well-formed text and its UTF-8 byte length for write-config.
+ * @param {string} content Text to encode; lone surrogates become U+FFFD.
+ * @returns {{text: string, bytes: number}} Encoded text and byte count.
+ */
+function wellFormedUtf8(content) {
+  var s = String(content == null ? "" : content)
+  var bytes = 0
+  var out = []
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i)
+    if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {
+      out.push(s.charAt(i) + s.charAt(i + 1))
+      bytes += 4
+      i++
+    } else if (c >= 0xd800 && c <= 0xdfff) {
+      out.push("\ufffd")
+      bytes += 3
+    } else {
+      out.push(s.charAt(i))
+      bytes += c < 0x80 ? 1 : c < 0x800 ? 2 : 3
+    }
+  }
+  return { text: out.join(""), bytes: bytes }
+}
+
+/**
+ * Frames write-config stdin as a UTF-8 byte count followed by content.
+ * @param {string} content Text to write.
+ * @returns {string} Length-prefixed stdin payload, with the byte count in UTF-8 units.
+ */
+function writeConfigInput(content) {
+  var framed = wellFormedUtf8(content)
+  return framed.bytes + "\n" + framed.text
+}
+
+/**
+ * Frames an expected base and replacement text for a guarded write-config operation.
+ * @param {string} base Exact prior file contents to compare before replacement.
+ * @param {string} content New file contents to write.
+ * @returns {string} Two length-prefixed stdin frames, each bounded by write-config.
+ */
+function writeConfigGuardedInput(base, content) {
+  return writeConfigInput(base) + writeConfigInput(content)
+}
+
+/**
+ * Determines whether a write-config process completed successfully.
+ * @param {number} exitCode Process exit code.
+ * @param {boolean} timedOut Whether the watchdog killed the process.
+ * @returns {boolean} True only for exit code 0 without a watchdog timeout.
+ */
+function writeSucceeded(exitCode, timedOut) {
+  return !timedOut && exitCode === 0
+}
+
+
+/** Exit status used when write-config refuses a non-generated Focus Log file. */
 var FOCUS_LOG_GUARD_SKIP_EXIT = 2
 function focusLogSkipMessage(focusLogPath) {
   return "Focus Log write skipped: " + String(focusLogPath || "") +
     " already exists and is not a generated Focus Log (no generated header), leaving it alone"
 }
-function focusLogCommand(writeScriptPath, focusLogPath, tableText) {
+
+/**
+ * Builds argv for atomically writing a generated Focus Log export.
+ * @param {string} writeScriptPath Path to the write-config script.
+ * @param {string} focusLogPath Absolute export path; a `.csv` suffix selects CSV upstream.
+ * @returns {string[]|null} Shell argv, or null when export is disabled/invalid.
+ * @remarks Non-empty files are replaced only when they carry the generated marker; an empty file is safe to replace.
+ */
+function focusLogCommand(writeScriptPath, focusLogPath) {
   var path = String(focusLogPath || "")
   if (!path || path.charAt(0) !== "/") return null
+  // -s, not -e: an empty file (a first write killed after --create) has nothing to guard.
   return ["sh", "-c",
-    'mkdir -p "$(dirname "$1")" && if [ -e "$1" ] && ! head -n 3 "$1" | grep -qE "This note is generated from|Sessions logged by OmoPomodorachy|^Date,Tag,Minutes,Source"; then exit 2; fi && exec bash "$2" --create "$1" "$3"',
-    "sh", path, String(writeScriptPath || ""), String(tableText || "")]
+    'mkdir -p "$(dirname "$1")" && if [ -s "$1" ] && ! head -n 3 "$1" | grep -qE "This note is generated from|Sessions logged by OmoPomodorachy|^Date,Tag,Minutes,Source"; then exit 2; fi && exec bash "$2" --create "$1"',
+    "sh", path, String(writeScriptPath || "")]
+}
+
+/**
+ * Encodes a local path as a file URL for Qt.openUrlExternally.
+ * @param {string} path Local filesystem path; query and fragment characters are escaped.
+ * @returns {string} A `file://` URL; performs no I/O.
+ */
+function fileUrl(path) {
+  return "file://" + encodeURI(String(path || "")).replace(/#/g, "%23").replace(/\?/g, "%3F")
 }

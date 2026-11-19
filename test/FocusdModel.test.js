@@ -8,6 +8,8 @@ const src = fs.readFileSync(path.join(__dirname, "..", "FocusdModel.js"), "utf8"
 const factory = new Function(
   src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, parseOnByDefault, shouldLaunchBreather, breatherPatternOptions, parseBreatherCustomPatterns, DURATION_LIMITS, clampDuration, parseDurations, presetSection, updateDuration, listPresets, setActivePreset, validPresetName, savePresetAs, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, addTag, removeTag, enqueueTag, removeScheduledTag, filterSchedule, shiftSchedule, saveSchedulePreset, loadSchedulePreset, deleteSchedulePreset, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, setJsonKey, configTextOk, FOCUS_LOG_HEADER, FOCUS_LOG_CSV_HEADER, focusLogFormat, focusLogText, focusLogCsvText, focusLogCommand, FOCUS_LOG_GUARD_SKIP_EXIT, focusLogSkipMessage };"
 );
+// writeConfigInput: the framed stdin that write-config reads (FocusdModel.js).
+const { writeConfigInput } = new Function(src + "\nreturn { writeConfigInput };")();
 const M = factory();
 
 let pass = 0;
@@ -374,12 +376,12 @@ check("focusLogCsvText: a tag starting with @ is quote-prefixed", M.focusLogCsvT
 check("focusLogCsvText: a tag starting with a tab is quote-prefixed", M.focusLogCsvText('[{"date":"2026-11-11","tag":"\\tcmd","minutes":25}]').indexOf("'\tcmd") !== -1);
 check("focusLogCsvText: a tag starting with CR is quote-prefixed", M.focusLogCsvText('[{"date":"2026-11-11","tag":"\\rcmd","minutes":25}]').indexOf("'\rcmd") !== -1);
 check("focusLogCsvText: a plain tag is not prefixed", M.focusLogCsvText('[{"date":"2026-11-11","tag":"Work","minutes":25}]').indexOf("2026-11-11,Work,25,") !== -1);
-var FOCUS_CMD = M.focusLogCommand("/x/write-config", "/home/aven/Projects/Obsidian/Home/20_Practices/Focus/Focus Log.md", "TABLE");
+var FOCUS_CMD = M.focusLogCommand("/x/write-config", "/home/aven/Projects/Obsidian/Home/20_Practices/Focus/Focus Log.md");
 check("focusLogCommand: starts with sh -c", FOCUS_CMD[0] === "sh" && FOCUS_CMD[1] === "-c");
-check("focusLogCommand: mkdirs the parent dir then execs write-config --create", FOCUS_CMD[2].indexOf('mkdir -p "$(dirname "$1")"') !== -1 && FOCUS_CMD[2].indexOf('exec bash "$2" --create "$1" "$3"') !== -1);
-check("focusLogCommand: path, script and table are positional args", FOCUS_CMD[4] === "/home/aven/Projects/Obsidian/Home/20_Practices/Focus/Focus Log.md" && FOCUS_CMD[5] === "/x/write-config" && FOCUS_CMD[6] === "TABLE");
-check("focusLogCommand: a relative path is null", M.focusLogCommand("/x/write-config", "Focus Log.md", "TABLE") === null);
-check("focusLogCommand: an empty path is null", M.focusLogCommand("/x/write-config", "", "TABLE") === null);
+check("focusLogCommand: mkdirs the parent dir then execs write-config --create", FOCUS_CMD[2].indexOf('mkdir -p "$(dirname "$1")"') !== -1 && FOCUS_CMD[2].indexOf('exec bash "$2" --create "$1"') !== -1);
+check("focusLogCommand: path and script are positional args; the table is not an argument", FOCUS_CMD.length === 6 && FOCUS_CMD[4] === "/home/aven/Projects/Obsidian/Home/20_Practices/Focus/Focus Log.md" && FOCUS_CMD[5] === "/x/write-config");
+check("focusLogCommand: a relative path is null", M.focusLogCommand("/x/write-config", "Focus Log.md") === null);
+check("focusLogCommand: an empty path is null", M.focusLogCommand("/x/write-config", "") === null);
 // Overwrite guard (Iolite review, PR #7; rename fallback, PR #9): an
 // existing file is only replaced when it starts with the generated
 // header. The marker is name-independent ("This note is generated
@@ -387,22 +389,22 @@ check("focusLogCommand: an empty path is null", M.focusLogCommand("/x/write-conf
 // Focus Log is still recognised as generated. A skipped write exits
 // with FOCUS_LOG_GUARD_SKIP_EXIT (2), not 0, so the caller can tell a
 // skip from a successful write and log it (guard-log follow-up).
-check("focusLogCommand: guard checks the existing file for the generated marker", FOCUS_CMD[2].indexOf('[ -e "$1" ]') !== -1 && FOCUS_CMD[2].indexOf("grep -qE") !== -1 && FOCUS_CMD[2].indexOf("This note is generated from") !== -1 && FOCUS_CMD[2].indexOf("Sessions logged by OmoPomodorachy") !== -1 && FOCUS_CMD[2].indexOf("exit 2") !== -1);
+check("focusLogCommand: guard checks the existing file for the generated marker", FOCUS_CMD[2].indexOf('[ -s "$1" ]') !== -1 && FOCUS_CMD[2].indexOf("grep -qE") !== -1 && FOCUS_CMD[2].indexOf("This note is generated from") !== -1 && FOCUS_CMD[2].indexOf("Sessions logged by OmoPomodorachy") !== -1 && FOCUS_CMD[2].indexOf("exit 2") !== -1);
 check("focusLogCommand: guard also accepts the format-specific CSV header row", FOCUS_CMD[2].indexOf("^Date,Tag,Minutes,Source") !== -1);
 check("focusLogSkipMessage: names the target path and the reason, no file contents", M.focusLogSkipMessage("/x/Focus Log.md").indexOf("/x/Focus Log.md") !== -1 && M.focusLogSkipMessage("/x/Focus Log.md").indexOf("not a generated Focus Log") !== -1);
 // Run the real argv against a stub write-config: a missing file is
 // written, a generated file is rewritten, a hand-written file is left
-// alone. The stub stands in for write-config --create (path, content).
+// alone. The stub stands in for write-config --create (path; framed content on stdin).
 var guardDir = fs.mkdtempSync(path.join(os.tmpdir(), "focus-log-guard-"));
 var stubPath = path.join(guardDir, "write-config");
-fs.writeFileSync(stubPath, "#!/usr/bin/env bash\nif [ \"$1\" = \"--create\" ]; then shift; fi\nprintf '%s' \"$2\" > \"$1\"\n");
+fs.writeFileSync(stubPath, "#!/usr/bin/env bash\nif [ \"$1\" = \"--create\" ]; then shift; fi\nread -r n\nhead -c \"$n\" > \"$1\"\n");
 fs.chmodSync(stubPath, 0o755);
 var guardTarget = path.join(guardDir, "Focus Log.md");
 function runFocusLog(content) {
-  var argv = M.focusLogCommand(stubPath, guardTarget, content);
+  var argv = M.focusLogCommand(stubPath, guardTarget);
   // spawnSync (not execFileSync): a guard skip exits 2, which must not
   // throw — the exit code is the signal the Service logs on.
-  var res = require("child_process").spawnSync(argv[0], argv.slice(1), { stdio: "ignore" });
+  var res = require("child_process").spawnSync(argv[0], argv.slice(1), { input: writeConfigInput(content), stdio: ["pipe", "ignore", "ignore"] });
   return res.status;
 }
 check("focusLogCommand guard: a missing file is written (exit 0)", runFocusLog(M.focusLogText("")) === 0 && fs.readFileSync(guardTarget, "utf8") === M.focusLogText(""));
@@ -414,6 +416,18 @@ fs.writeFileSync(guardTarget, OLD_HEADER + "\n");
 check("focusLogCommand guard: an old-header file is rewritten (exit 0)", runFocusLog(M.focusLogText(SAMPLE_LOG_JSON)) === 0 && fs.readFileSync(guardTarget, "utf8") === M.focusLogText(SAMPLE_LOG_JSON));
 fs.writeFileSync(guardTarget, "# My own notes\n\nDo not overwrite.\n");
 check("focusLogCommand guard: a hand-written file is left alone (exit 2)", runFocusLog(M.focusLogText(SAMPLE_LOG_JSON)) === M.FOCUS_LOG_GUARD_SKIP_EXIT && fs.readFileSync(guardTarget, "utf8") === "# My own notes\n\nDo not overwrite.\n");
+// A first Focus Log write killed after --create leaves a zero-byte file.
+// It holds nothing to guard, so the next export replaces it (the guard used
+// to refuse it forever).
+fs.writeFileSync(guardTarget, "");
+check("focusLogCommand guard: an empty file left by a killed first write is replaced (exit 0)", runFocusLog(M.focusLogText(SAMPLE_LOG_JSON)) === 0 && fs.readFileSync(guardTarget, "utf8") === M.focusLogText(SAMPLE_LOG_JSON));
+// writeSucceeded (Service's write queue): a watchdog-killed write fails even
+// when the process reports exit 0.
+var WRITE_OK = new Function(src + "\nreturn { writeSucceeded };")().writeSucceeded;
+check("writeSucceeded: exit 0 and not killed succeeds", WRITE_OK(0, false) === true);
+check("writeSucceeded: a timed-out write fails even at exit 0", WRITE_OK(0, true) === false);
+check("writeSucceeded: a non-zero exit fails", WRITE_OK(1, false) === false && WRITE_OK(2, false) === false);
+check("writeSucceeded: a timed-out write fails at a non-zero exit too", WRITE_OK(137, true) === false);
 fs.rmSync(guardDir, { recursive: true, force: true });
 
 // CSV guard stub (Iolite review, PR #13): same argv, CSV target. A
@@ -421,12 +435,12 @@ fs.rmSync(guardDir, { recursive: true, force: true });
 // hand-written CSV with a plain Date,Tag,Minutes header is left alone.
 var csvGuardDir = fs.mkdtempSync(path.join(os.tmpdir(), "focus-log-csv-guard-"));
 var csvStubPath = path.join(csvGuardDir, "write-config");
-fs.writeFileSync(csvStubPath, "#!/usr/bin/env bash\nif [ \"$1\" = \"--create\" ]; then shift; fi\nprintf '%s' \"$2\" > \"$1\"\n");
+fs.writeFileSync(csvStubPath, "#!/usr/bin/env bash\nif [ \"$1\" = \"--create\" ]; then shift; fi\nread -r n\nhead -c \"$n\" > \"$1\"\n");
 fs.chmodSync(csvStubPath, 0o755);
 var csvGuardTarget = path.join(csvGuardDir, "focus-log.csv");
 function runFocusLogCsv(content) {
-  var argv = M.focusLogCommand(csvStubPath, csvGuardTarget, content);
-  var res = require("child_process").spawnSync(argv[0], argv.slice(1), { stdio: "ignore" });
+  var argv = M.focusLogCommand(csvStubPath, csvGuardTarget);
+  var res = require("child_process").spawnSync(argv[0], argv.slice(1), { input: writeConfigInput(content), stdio: ["pipe", "ignore", "ignore"] });
   return res.status;
 }
 check("focusLogCommand CSV guard: a missing file is written (exit 0)", runFocusLogCsv(M.focusLogCsvText("")) === 0 && fs.readFileSync(csvGuardTarget, "utf8") === M.focusLogCsvText(""));
@@ -475,5 +489,72 @@ check("loadSchedulePreset: returns the saved queue", JSON.stringify(M.loadSchedu
 check("loadSchedulePreset: an unknown name is null", M.loadSchedulePreset(schedPresets, "Nope") === null);
 check("deleteSchedulePreset: removes the preset", JSON.stringify(M.deleteSchedulePreset(schedPresets, "Morning")) === JSON.stringify({}));
 check("deleteSchedulePreset: an unknown name is null", M.deleteSchedulePreset(schedPresets, "Nope") === null);
+
+// --- View log URL (Service.openLog → Model.fileUrl) ---
+// "#" and "?" start the fragment and query of a URL, so they are escaped; a
+// space and a "%" are escaped by encodeURI as before.
+const FILE_URL = new Function(src + "\nreturn { fileUrl };")();
+check("fileUrl: a plain path is file:// plus the path", FILE_URL.fileUrl("/home/aven/notes.md") === "file:///home/aven/notes.md");
+check("fileUrl: a space is escaped", FILE_URL.fileUrl("/home/aven/Focus Log.md") === "file:///home/aven/Focus%20Log.md");
+check("fileUrl: a # is escaped, not read as a fragment", FILE_URL.fileUrl("/home/aven/Focus #2.md") === "file:///home/aven/Focus%20%232.md");
+check("fileUrl: a ? is escaped, not read as a query", FILE_URL.fileUrl("/home/aven/what?.csv") === "file:///home/aven/what%3F.csv");
+check("fileUrl: a % is escaped once", FILE_URL.fileUrl("/home/aven/100%.md") === "file:///home/aven/100%25.md");
+
+// --- Sessions log edits: applied to a fresh read, never to the poll copy ---
+// Service.queueSessionEdit → applySessionEdit. SE_POLLED is what the last
+// poll read; SE_EXTERNAL is the file when the block ends, after an outside
+// writer changed it between polls. The edit must keep the outside change.
+const SE = new Function(src + "\nreturn { applySessionEdit, sessionLogTextOk, sessionEditSkipMessage, wellFormedUtf8 };")();
+const SE_CAP = 1048576;
+const SE_WORK = { date: "2026-11-17", tag: "Work", minutes: 25 };
+const SE_ADMIN = { date: "2026-11-18", tag: "Admin", minutes: 10 };
+const SE_BLOCK = { date: "2026-11-18", tag: "Study", minutes: 25 };
+const SE_POLLED = JSON.stringify([SE_WORK]);
+const SE_EXTERNAL = JSON.stringify([SE_WORK, SE_ADMIN]);
+const seAppended = SE.applySessionEdit(SE_EXTERNAL, { kind: "append", entry: SE_BLOCK }, SE_CAP);
+check("session edit: an append after an outside entry keeps that entry", seAppended.text !== undefined && M.parseSessionLog(seAppended.text).length === 3 && M.parseSessionLog(seAppended.text)[1].tag === "Admin");
+check("session edit: the new block is appended last", seAppended.text !== undefined && M.parseSessionLog(seAppended.text)[2].tag === "Study" && M.parseSessionLog(seAppended.text)[2].minutes === 25);
+check("session edit: appending to the poll copy would drop the outside entry (the stale write this prevents)", M.parseSessionLog(M.appendSessionLog(SE_POLLED, SE_BLOCK)).length === 2 && M.parseSessionLog(seAppended.text).length === 3);
+const SE_REPLACED = JSON.stringify([{ date: "2026-11-18", tag: "Art", minutes: 40 }]);
+const seReplaced = SE.applySessionEdit(SE_REPLACED, { kind: "append", entry: SE_BLOCK }, SE_CAP);
+check("session edit: an outside replace between polls is what gets appended to", seReplaced.text !== undefined && M.parseSessionLog(seReplaced.text).length === 2 && M.parseSessionLog(seReplaced.text)[0].tag === "Art" && M.parseSessionLog(seReplaced.text)[1].tag === "Study");
+const seEmptied = SE.applySessionEdit("", { kind: "append", entry: SE_BLOCK }, SE_CAP);
+check("session edit: a missing or emptied file gets the block alone", seEmptied.text !== undefined && M.parseSessionLog(seEmptied.text).length === 1);
+const SE_PARTIAL = ['{"date":', "{}", '"text"', "[1,"];
+check("session edit: a partial write or a non-array is skipped, never replaced by one entry", SE_PARTIAL.every((t) => SE.applySessionEdit(t, { kind: "append", entry: SE_BLOCK }, SE_CAP).skip !== undefined));
+check("sessionLogTextOk: empty and an array are safe to write over; an object and broken JSON are not", SE.sessionLogTextOk("") && SE.sessionLogTextOk("[]") && !SE.sessionLogTextOk("{}") && !SE.sessionLogTextOk("{oops"));
+const seRetagged = SE.applySessionEdit(SE_EXTERNAL, { kind: "retag", tag: "Art", expect: SE_ADMIN }, SE_CAP);
+check("session edit retag: the block shown is still last, so its tag changes and the others stay", seRetagged.text !== undefined && M.parseSessionLog(seRetagged.text)[1].tag === "Art" && M.parseSessionLog(seRetagged.text)[0].tag === "Work");
+const seMoved = SE.applySessionEdit(seAppended.text, { kind: "retag", tag: "Art", expect: SE_ADMIN }, SE_CAP);
+check("session edit retag: a block added after the shown one is not retagged", seMoved.skip !== undefined && seMoved.text === undefined);
+check("session edit retag: an empty tag or an empty file is skipped", SE.applySessionEdit(SE_EXTERNAL, { kind: "retag", tag: "", expect: SE_ADMIN }, SE_CAP).skip !== undefined && SE.applySessionEdit("", { kind: "retag", tag: "Art", expect: SE_ADMIN }, SE_CAP).skip !== undefined);
+const seChained = SE.applySessionEdit(seAppended.text, { kind: "retag", tag: "Art", expect: SE_BLOCK }, SE_CAP);
+check("session edit batch: a retag of the block appended first applies to the same text", seChained.text !== undefined && M.parseSessionLog(seChained.text)[2].tag === "Art" && M.parseSessionLog(seChained.text).length === 3);
+const seEntryJson = (tag) => JSON.stringify([{ date: "2026-11-18", tag: tag, minutes: 25 }]);
+const seBase = Buffer.byteLength(seEntryJson(""));
+const seFit = Math.floor((SE_CAP - seBase) / 2);
+const seAtCap = SE.applySessionEdit("", { kind: "append", entry: { date: "2026-11-18", tag: "é".repeat(seFit), minutes: 25 } }, SE_CAP);
+const seOverCap = SE.applySessionEdit("", { kind: "append", entry: { date: "2026-11-18", tag: "é".repeat(seFit + 1), minutes: 25 } }, SE_CAP);
+check("session edit cap: a result within 1 MiB is written", seAtCap.text !== undefined && Buffer.byteLength(seAtCap.text) <= SE_CAP);
+check("session edit cap: one more two-byte character over 1 MiB is skipped", seOverCap.skip !== undefined && seOverCap.text === undefined);
+check("wellFormedUtf8: a lone surrogate counts as U+FFFD (3 bytes)", SE.wellFormedUtf8("\ud800").bytes === 3 && SE.wellFormedUtf8("\ud800").text === "\ufffd");
+const seMsg = SE.sessionEditSkipMessage("/x/focusd-sessions.json", { kind: "retag" }, "the last block on disk is not the block shown");
+check("sessionEditSkipMessage: names the file, the reason and that nothing was written", seMsg.indexOf("/x/focusd-sessions.json") !== -1 && seMsg.indexOf("the last block on disk") !== -1 && seMsg.indexOf("nothing written") !== -1 && seMsg.indexOf("tag change") !== -1);
+
+// --- Guarded sessions write: framing, the conflict exit, the bounded retry ---
+const SC = new Function(src + "\nreturn { writeConfigGuardedInput, writeConfigInput, SESSIONS_CHANGED_EXIT, SESSION_EDIT_MAX_CONFLICTS, retrySessionEdits };")();
+check("guarded input: the base frame, then the content frame", SC.writeConfigGuardedInput("ab", "é") === "2\nab2\né");
+check("guarded input: an empty base is a zero-count frame", SC.writeConfigGuardedInput("", "x") === "0\n1\nx");
+check("guarded input: each frame counts its own UTF-8 bytes", SC.writeConfigGuardedInput("😀", "é") === "4\n😀" + "2\né");
+check("guarded input: the base frame is the single-frame framing", SC.writeConfigGuardedInput("ab", "c").indexOf(SC.writeConfigInput("ab")) === 0);
+check("SESSIONS_CHANGED_EXIT is 3, write-config's conflict exit", SC.SESSIONS_CHANGED_EXIT === 3);
+const rEdit = { kind: "append", entry: SE_BLOCK };
+const r1 = SC.retrySessionEdits([rEdit]);
+check("retry: a first conflict is retried, marked with one conflict", r1.retry.length === 1 && r1.dropped.length === 0 && r1.retry[0].conflicts === 1 && r1.retry[0].kind === "append");
+check("retry: the input edit object is not changed", rEdit.conflicts === undefined && r1.retry[0] !== rEdit);
+const r2 = SC.retrySessionEdits([{ kind: "append", entry: SE_BLOCK, conflicts: SC.SESSION_EDIT_MAX_CONFLICTS - 1 }]);
+check("retry: an edit at the conflict limit is dropped", r2.retry.length === 0 && r2.dropped.length === 1 && r2.dropped[0].conflicts === SC.SESSION_EDIT_MAX_CONFLICTS);
+check("retry: no edits, or a non-array, give nothing to retry", SC.retrySessionEdits(undefined).retry.length === 0 && SC.retrySessionEdits([]).dropped.length === 0);
+
 
 console.log(`FocusdModel tests: ${pass} passed${process.exitCode ? " (WITH FAILURES)" : ""}`);
