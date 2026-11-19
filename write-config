@@ -136,7 +136,11 @@ def remove_quietly(p):
 expected = read_frame() if expect else None
 content = read_frame()
 
-mode = 0o644
+# A new file gets the mode the user's umask allows (0666 minus umask), as an
+# ordinary `>` redirect would. os.umask(0) reads the value; it is restored at once.
+_umask = os.umask(0)
+os.umask(_umask)
+mode = 0o666 & ~_umask
 try:
     fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
 except FileNotFoundError:
@@ -151,7 +155,7 @@ except FileNotFoundError:
         # The file does not exist yet. Create it: O_CREAT|O_EXCL refuses if
         # the path appears in the meantime, including as a symlink, so nothing
         # is followed.
-        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666)
 except OSError:
     sys.exit(1)
 if fd is not None:

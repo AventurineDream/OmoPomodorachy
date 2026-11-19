@@ -85,6 +85,9 @@ Item {
   // the other sliders may hold stale values, and passing those in would
   // write them back over a TUI change to a different key.
   property bool pendingWrite: false
+  // Bumped on every queued write to focusd's config.toml. A durations read
+  // that started before a bump may predate that write, so it is discarded.
+  property int focusdWriteSeq: 0
   property string pendingWriteKind: ""
   property int pendingWriteValue: 0
   // A preset switch or Save As is waiting on a fresh re-read of the
@@ -280,6 +283,8 @@ Item {
   // queueWrite for input already framed: Model.writeConfigInput for one
   // frame, Model.writeConfigGuardedInput for the sessions log's guarded pair.
   function queueFramedWrite(path, command, input, onExit) {
+    if (path === root.focusdConfigPath)
+      root.focusdWriteSeq++;
     root.writeQueue.push({ path: path, command: command, input: input, onExit: onExit || null, timedOut: false });
     root.drainWrites();
   }
@@ -656,6 +661,7 @@ Item {
     durationsProc.timedOut = false;
     durationsProc.command = ["bash", root.readScriptPath, root.focusdConfigPath, String(root.maxConfigBytes)];
     durationsWatchdog.restart();
+    durationsProc.readSeq = root.focusdWriteSeq;
     durationsProc.running = true;
   }
 
@@ -990,6 +996,7 @@ Item {
     property int collectedBytes: 0
     property bool overflowed: false
     property bool timedOut: false
+    property int readSeq: 0
     stdout: SplitParser {
       onRead: function (data) {
         if (durationsProc.overflowed || durationsProc.timedOut)
@@ -1027,6 +1034,12 @@ Item {
       durationsProc.collectedBytes = 0;
       durationsProc.overflowed = false;
       durationsProc.timedOut = false;
+      // A focusd write queued since this read started makes its text stale,
+      // and a write still pending makes it older than what is queued. Drop
+      // the read: the write's exit reloads the durations, and the next poll
+      // reads again.
+      if (durationsProc.readSeq !== root.focusdWriteSeq || root.writePending(root.focusdConfigPath))
+        return;
       root.applyDurations(ok, output);
     }
   }
@@ -1429,6 +1442,11 @@ Item {
       else if (!ok)
         console.warn("Focusd: write failed for " + job.path + " (" + (job.timedOut ? "timed out" : "exit " + exitCode) + ")");
       root.drainWrites();
+      // A slider release or preset pick that waited on a write is applied now,
+      // not on the next 10s poll. loadDurations skips while another focusd
+      // write is still pending, and that write's exit runs this again.
+      if (root.pendingWrite || root.pendingPresetOp !== "")
+        root.loadDurations();
     }
   }
 

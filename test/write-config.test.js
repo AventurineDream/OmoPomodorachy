@@ -141,6 +141,11 @@ fs.chmodSync(modeFile, 0o600);
 writeFramed(modeFile, "new");
 check("mode: an existing file keeps its mode (0600) and gets the new text", (fs.statSync(modeFile).mode & 0o777) === 0o600 && fs.readFileSync(modeFile, "utf8") === "new");
 
+// --- a new file takes the umask (not a fixed 0644) ---
+const umaskFile = path.join(dir, "umask.json");
+const umaskRun = spawnSync("bash", ["-c", 'umask 027; exec bash "$0" --create "$1"', SCRIPT, umaskFile], { input: M.writeConfigInput("new") });
+check("umask: a new file is created with the umask applied (0640 under umask 027)", umaskRun.status === 0 && (fs.statSync(umaskFile).mode & 0o777) === 0o640);
+
 // --- symlinks are never followed ---
 const realTarget = path.join(dir, "real.json");
 fs.writeFileSync(realTarget, "real");
