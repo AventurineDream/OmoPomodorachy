@@ -12,12 +12,13 @@
 # reliably deliver EOF after a large write. Each frame is capped at 1 MiB,
 # counted in bytes, and no frame is delimited by its content.
 #
-# --expect is compare-before-replace for the sessions log. The file must hold
-# exactly the expected bytes (a missing file holds only the empty expected
-# text). The compare is made before any temp file is created, and again just
-# before the rename, so a change during the new text's write is caught too.
+# --expect is compare-before-replace for the sessions log and focusd.json.
+# The file must hold exactly the expected bytes (a missing file holds only
+# the empty expected text). The compare is made before any temp file is
+# created, and again just before the rename, so a change during the new
+# text's write is caught too.
 # If the file differs (a sync, a hand edit, another Focusd) nothing is written,
-# the file is kept, and the script exits 3 (SESSIONS_CHANGED_EXIT in
+# the file is kept, and the script exits 3 (FILE_CHANGED_EXIT in
 # FocusdModel.js). The last compare and the rename are two system calls, so a
 # writer that changes the file in between still wins: that window is one
 # re-read of the file.
@@ -69,7 +70,7 @@ import sys
 import tempfile
 
 MAX_BYTES = 1048576
-SESSIONS_CHANGED_EXIT = 3
+FILE_CHANGED_EXIT = 3
 path, create, expect = sys.argv[1], sys.argv[2] == "1", sys.argv[3] == "1"
 
 
@@ -169,7 +170,7 @@ if fd is not None:
 
 # The first compare: a changed file is refused before any temp file exists.
 if expect and not holds(path, expected):
-    sys.exit(SESSIONS_CHANGED_EXIT)
+    sys.exit(FILE_CHANGED_EXIT)
 
 directory = os.path.dirname(path)
 fd, tmp = tempfile.mkstemp(prefix=".write-config-", dir=directory)
@@ -183,7 +184,7 @@ try:
     # the new text was being written and synced.
     if expect and not holds(path, expected):
         remove_quietly(tmp)
-        sys.exit(SESSIONS_CHANGED_EXIT)
+        sys.exit(FILE_CHANGED_EXIT)
     os.replace(tmp, path)
 except OSError:
     remove_quietly(tmp)

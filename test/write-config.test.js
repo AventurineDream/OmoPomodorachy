@@ -14,7 +14,7 @@ const ROOT = path.join(__dirname, "..");
 const SCRIPT = path.join(ROOT, "write-config");
 const src = fs.readFileSync(path.join(ROOT, "FocusdModel.js"), "utf8");
 const M = new Function(
-  src + "\nreturn { writeConfigInput, writeConfigGuardedInput, focusLogCommand, focusLogText };"
+  src + "\nreturn { writeConfigInput, writeConfigGuardedInput, focusLogCommand, focusLogText, applyConfigEdits };"
 )();
 
 const ARG_STRING_LIMIT = 131072; // Linux MAX_ARG_STRLEN: one argv string must stay below this.
@@ -161,7 +161,7 @@ check("symlink: a file in a symlinked directory is refused", writeFramed(path.jo
 // --- --expect: compare-before-replace for the sessions log ---
 // Stdin is two frames: the expected current text, then the new text. The file
 // is replaced only while its bytes equal the expected text; otherwise the
-// script exits 3 (SESSIONS_CHANGED_EXIT), writes nothing and keeps the file.
+// script exits 3 (FILE_CHANGED_EXIT), writes nothing and keeps the file.
 const CONFLICT = 3;
 const guardedRun = (target, expected, content, flags = ["--create", "--expect"]) =>
   runScript([...flags, target], M.writeConfigGuardedInput(expected, content));
@@ -203,5 +203,19 @@ fs.writeFileSync(gMode, "old");
 fs.chmodSync(gMode, 0o600);
 check("expect: an unchanged target keeps its mode (0600)", guardedRun(gMode, "old", "new").status === 0 && (fs.statSync(gMode).mode & 0o777) === 0o600);
 check("options: an unknown option is refused and the target kept", runScript(["--bogus", gFile], M.writeConfigInput("x")).status === 1 && fs.readFileSync(gFile, "utf8") === "[9]");
+
+// --- focusd.json: a hand-revoked export destination stays revoked ---
+// Regression (marketplace review #15501). The panel read focusd.json with a
+// focusLogPath; the user then removed it by hand. A key write built from the
+// panel's stale copy must not land, and the write rebuilt from a fresh read
+// must not carry the old path back.
+const cfgFile = path.join(dir, "focusd.json");
+const staleCfg = '{\n  "focusLogPath": "/home/u/old.md",\n  "rounds": 0\n}\n';
+const handCfg = '{\n  "rounds": 0\n}\n';
+fs.writeFileSync(cfgFile, handCfg);
+const staleWrite = M.applyConfigEdits(staleCfg, [{ key: "rounds", value: 4 }]).text;
+check("focusd.json: a write built from the stale copy conflicts (exit 3), the revocation kept", guardedRun(cfgFile, staleCfg, staleWrite).status === CONFLICT && fs.readFileSync(cfgFile, "utf8") === handCfg);
+const freshWrite = M.applyConfigEdits(fs.readFileSync(cfgFile, "utf8"), [{ key: "rounds", value: 4 }]).text;
+check("focusd.json: the retry from a fresh read lands without the revoked path", guardedRun(cfgFile, handCfg, freshWrite).status === 0 && JSON.parse(fs.readFileSync(cfgFile, "utf8")).rounds === 4 && !("focusLogPath" in JSON.parse(fs.readFileSync(cfgFile, "utf8"))));
 
 console.log(`write-config tests: ${pass} passed${process.exitCode ? " (WITH FAILURES)" : ""}`);
