@@ -1,6 +1,6 @@
 # OmaPomodorchy
 
-An Omarchy bar interface for [Focusd](https://github.com/BibekBhusal0/focusd), the Pomodoro timer. Start and steer focus sessions without leaving the shell, then review the work in Focusd's history, streaks, goals, and statistics. Current version: 1.13.3.
+An Omarchy bar interface for [Focusd](https://github.com/BibekBhusal0/focusd), the Pomodoro timer. Start and steer focus sessions without leaving the shell, then review the work in Focusd's history, streaks, goals, and statistics. Current version: 1.13.4.
 
 Optional integration with [Terminal Breather](https://github.com/AventurineDream/Terminal-Breather) can start a guided breathing session when a break begins.
 
