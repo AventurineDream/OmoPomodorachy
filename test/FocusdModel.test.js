@@ -376,10 +376,10 @@ check("focusLogCsvText: a tag starting with @ is quote-prefixed", M.focusLogCsvT
 check("focusLogCsvText: a tag starting with a tab is quote-prefixed", M.focusLogCsvText('[{"date":"2026-11-11","tag":"\\tcmd","minutes":25}]').indexOf("'\tcmd") !== -1);
 check("focusLogCsvText: a tag starting with CR is quote-prefixed", M.focusLogCsvText('[{"date":"2026-11-11","tag":"\\rcmd","minutes":25}]').indexOf("'\rcmd") !== -1);
 check("focusLogCsvText: a plain tag is not prefixed", M.focusLogCsvText('[{"date":"2026-11-11","tag":"Work","minutes":25}]').indexOf("2026-11-11,Work,25,") !== -1);
-var FOCUS_CMD = M.focusLogCommand("/x/write-config", "/home/aven/Projects/Obsidian/Home/20_Practices/Focus/Focus Log.md");
+var FOCUS_CMD = M.focusLogCommand("/x/write-config", "/home/aven/Projects/Obsidian/Aventurine/20_Practices/Focus/Focus Log.md");
 check("focusLogCommand: starts with sh -c", FOCUS_CMD[0] === "sh" && FOCUS_CMD[1] === "-c");
 check("focusLogCommand: mkdirs the parent dir then execs write-config --create", FOCUS_CMD[2].indexOf('mkdir -p "$(dirname "$1")"') !== -1 && FOCUS_CMD[2].indexOf('exec bash "$2" --create "$1"') !== -1);
-check("focusLogCommand: path and script are positional args; the table is not an argument", FOCUS_CMD.length === 6 && FOCUS_CMD[4] === "/home/aven/Projects/Obsidian/Home/20_Practices/Focus/Focus Log.md" && FOCUS_CMD[5] === "/x/write-config");
+check("focusLogCommand: path and script are positional args; the table is not an argument", FOCUS_CMD.length === 6 && FOCUS_CMD[4] === "/home/aven/Projects/Obsidian/Aventurine/20_Practices/Focus/Focus Log.md" && FOCUS_CMD[5] === "/x/write-config");
 check("focusLogCommand: a relative path is null", M.focusLogCommand("/x/write-config", "Focus Log.md") === null);
 check("focusLogCommand: an empty path is null", M.focusLogCommand("/x/write-config", "") === null);
 // Overwrite guard (Iolite review, PR #7; rename fallback, PR #9): an
