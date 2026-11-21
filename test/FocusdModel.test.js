@@ -6,7 +6,7 @@ const os = require("os");
 const { execFileSync } = require("child_process");
 const src = fs.readFileSync(path.join(__dirname, "..", "FocusdModel.js"), "utf8");
 const factory = new Function(
-  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, parseOnByDefault, shouldLaunchBreather, breatherPatternOptions, parseBreatherCustomPatterns, DURATION_LIMITS, clampDuration, parseDurations, presetSection, updateDuration, listPresets, setActivePreset, validPresetName, savePresetAs, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, addTag, removeTag, enqueueTag, removeScheduledTag, filterSchedule, shiftSchedule, saveSchedulePreset, loadSchedulePreset, deleteSchedulePreset, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, setJsonKey, configTextOk, FOCUS_LOG_HEADER, FOCUS_LOG_CSV_HEADER, focusLogFormat, focusLogText, focusLogCsvText, focusLogCommand, FOCUS_LOG_GUARD_SKIP_EXIT, focusLogSkipMessage };"
+  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, parseOnByDefault, shouldLaunchBreather, breatherPatternOptions, parseBreatherCustomPatterns, DURATION_LIMITS, clampDuration, parseDurations, presetSection, updateDuration, listPresets, setActivePreset, validPresetName, savePresetAs, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, addTag, removeTag, enqueueTag, removeScheduledTag, filterSchedule, shiftSchedule, saveSchedulePreset, loadSchedulePreset, deleteSchedulePreset, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, applyConfigEdits, configEditSkipMessage, configTextOk, FOCUS_LOG_HEADER, FOCUS_LOG_CSV_HEADER, focusLogFormat, focusLogText, focusLogCsvText, focusLogCommand, FOCUS_LOG_GUARD_SKIP_EXIT, focusLogSkipMessage };"
 );
 // writeConfigInput: the framed stdin that write-config reads (FocusdModel.js).
 const { writeConfigInput } = new Function(src + "\nreturn { writeConfigInput };")();
@@ -329,12 +329,23 @@ check("nextTag: wraps around", M.nextTag(["Work", "Study", "Art"], "Art") === "W
 check("nextTag: an unknown tag starts at the first", M.nextTag(["Work", "Study", "Art"], "Other") === "Work");
 check("nextTag: an empty list is empty", M.nextTag([], "Work") === "");
 
-// --- Rounds setting (GUI) ---
-check("setJsonKey: sets a key in existing JSON", JSON.parse(M.setJsonKey('{"rounds": 0, "tags": ["Work"]}', "rounds", 4)).rounds === 4);
-check("setJsonKey: keeps the other keys", JSON.parse(M.setJsonKey('{"rounds": 0, "tags": ["Work"]}', "rounds", 4)).tags[0] === "Work");
-check("setJsonKey: an empty file starts fresh", JSON.parse(M.setJsonKey("", "rounds", 4)).rounds === 4);
-check("setJsonKey: an invalid file starts fresh", JSON.parse(M.setJsonKey("{oops", "rounds", 4)).rounds === 4);
-check("setJsonKey: output is indented JSON", M.setJsonKey("", "rounds", 4).indexOf('\n  "rounds": 4') !== -1);
+// --- focusd.json key writes (applyConfigEdits) ---
+// Regression (marketplace review #15501): a key write built from the panel's
+// in-memory copy put back a focusLogPath the user had removed by hand, and
+// later exports went to the revoked file. Writes now apply to a fresh read.
+const handRevoked = '{"rounds": 0, "tags": ["Work"]}';
+const revokedWrite = M.applyConfigEdits(handRevoked, [{ key: "tagSchedule", value: ["Work"] }]);
+check("applyConfigEdits: a key write never restores a focusLogPath the file no longer has", !("focusLogPath" in JSON.parse(revokedWrite.text)));
+const handChanged = '{"focusLogPath": "/tmp/new.md", "rounds": 0}';
+check("applyConfigEdits: a key write keeps a hand-changed focusLogPath", JSON.parse(M.applyConfigEdits(handChanged, [{ key: "rounds", value: 4 }]).text).focusLogPath === "/tmp/new.md");
+const multi = JSON.parse(M.applyConfigEdits('{"rounds": 0, "tags": ["Work"]}', [{ key: "rounds", value: 4 }, { key: "rounds", value: 6 }, { key: "tagsExpanded", value: false }]).text);
+check("applyConfigEdits: edits apply in order and keep the other keys", multi.rounds === 6 && multi.tagsExpanded === false && multi.tags[0] === "Work");
+check("applyConfigEdits: an empty file starts fresh", JSON.parse(M.applyConfigEdits("", [{ key: "rounds", value: 4 }]).text).rounds === 4);
+check("applyConfigEdits: an edit that changes nothing returns the file's exact text", M.applyConfigEdits('{"rounds":4}', [{ key: "rounds", value: 4 }]).text === '{"rounds":4}');
+check("applyConfigEdits: output is indented JSON", M.applyConfigEdits("", [{ key: "rounds", value: 4 }]).text.indexOf('\n  "rounds": 4') !== -1);
+check("applyConfigEdits: an invalid file is skipped, never rewritten", !!M.applyConfigEdits("{oops", [{ key: "rounds", value: 4 }]).skip);
+check("applyConfigEdits: a JSON array is skipped", !!M.applyConfigEdits("[1]", [{ key: "rounds", value: 4 }]).skip);
+check("configEditSkipMessage: names the key and the file, not the value", M.configEditSkipMessage("/c/focusd.json", { key: "focusLogPath", value: "/secret" }, "why").indexOf("/secret") === -1 && M.configEditSkipMessage("/c/focusd.json", { key: "rounds", value: 4 }, "why").indexOf("rounds") !== -1);
 
 // --- Config write guard ---
 check("configTextOk: empty text is safe (no file yet)", M.configTextOk("") === true);
@@ -542,19 +553,19 @@ const seMsg = SE.sessionEditSkipMessage("/x/focusd-sessions.json", { kind: "reta
 check("sessionEditSkipMessage: names the file, the reason and that nothing was written", seMsg.indexOf("/x/focusd-sessions.json") !== -1 && seMsg.indexOf("the last block on disk") !== -1 && seMsg.indexOf("nothing written") !== -1 && seMsg.indexOf("tag change") !== -1);
 
 // --- Guarded sessions write: framing, the conflict exit, the bounded retry ---
-const SC = new Function(src + "\nreturn { writeConfigGuardedInput, writeConfigInput, SESSIONS_CHANGED_EXIT, SESSION_EDIT_MAX_CONFLICTS, retrySessionEdits };")();
+const SC = new Function(src + "\nreturn { writeConfigGuardedInput, writeConfigInput, FILE_CHANGED_EXIT, EDIT_MAX_CONFLICTS, retryConflictedEdits };")();
 check("guarded input: the base frame, then the content frame", SC.writeConfigGuardedInput("ab", "é") === "2\nab2\né");
 check("guarded input: an empty base is a zero-count frame", SC.writeConfigGuardedInput("", "x") === "0\n1\nx");
 check("guarded input: each frame counts its own UTF-8 bytes", SC.writeConfigGuardedInput("😀", "é") === "4\n😀" + "2\né");
 check("guarded input: the base frame is the single-frame framing", SC.writeConfigGuardedInput("ab", "c").indexOf(SC.writeConfigInput("ab")) === 0);
-check("SESSIONS_CHANGED_EXIT is 3, write-config's conflict exit", SC.SESSIONS_CHANGED_EXIT === 3);
+check("FILE_CHANGED_EXIT is 3, write-config's conflict exit", SC.FILE_CHANGED_EXIT === 3);
 const rEdit = { kind: "append", entry: SE_BLOCK };
-const r1 = SC.retrySessionEdits([rEdit]);
+const r1 = SC.retryConflictedEdits([rEdit]);
 check("retry: a first conflict is retried, marked with one conflict", r1.retry.length === 1 && r1.dropped.length === 0 && r1.retry[0].conflicts === 1 && r1.retry[0].kind === "append");
 check("retry: the input edit object is not changed", rEdit.conflicts === undefined && r1.retry[0] !== rEdit);
-const r2 = SC.retrySessionEdits([{ kind: "append", entry: SE_BLOCK, conflicts: SC.SESSION_EDIT_MAX_CONFLICTS - 1 }]);
-check("retry: an edit at the conflict limit is dropped", r2.retry.length === 0 && r2.dropped.length === 1 && r2.dropped[0].conflicts === SC.SESSION_EDIT_MAX_CONFLICTS);
-check("retry: no edits, or a non-array, give nothing to retry", SC.retrySessionEdits(undefined).retry.length === 0 && SC.retrySessionEdits([]).dropped.length === 0);
+const r2 = SC.retryConflictedEdits([{ kind: "append", entry: SE_BLOCK, conflicts: SC.EDIT_MAX_CONFLICTS - 1 }]);
+check("retry: an edit at the conflict limit is dropped", r2.retry.length === 0 && r2.dropped.length === 1 && r2.dropped[0].conflicts === SC.EDIT_MAX_CONFLICTS);
+check("retry: no edits, or a non-array, give nothing to retry", SC.retryConflictedEdits(undefined).retry.length === 0 && SC.retryConflictedEdits([]).dropped.length === 0);
 
 
 console.log(`FocusdModel tests: ${pass} passed${process.exitCode ? " (WITH FAILURES)" : ""}`);

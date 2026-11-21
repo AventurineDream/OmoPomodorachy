@@ -683,18 +683,19 @@ function sessionEditSkipMessage(sessionsPath, edit, reason) {
 }
 
 // write-config's exit status for a guarded write (--expect) whose file no
-// longer holds the text the edit was built from. Nothing was written.
-var SESSIONS_CHANGED_EXIT = 3
-// A conflicted edit goes back to a fresh read, but only this many times in
-// all; after that it is dropped with a warning, so a file that keeps changing
-// cannot hold the queue forever.
-var SESSION_EDIT_MAX_CONFLICTS = 3
+// longer holds the text the edit was built from. Nothing was written. The
+// sessions log and focusd.json both write this way.
+var FILE_CHANGED_EXIT = 3
+// A conflicted edit (sessions log or focusd.json) goes back to a fresh read,
+// but only this many times in all; after that it is dropped with a warning,
+// so a file that keeps changing cannot hold the queue forever.
+var EDIT_MAX_CONFLICTS = 3
 /**
  * Splits conflicted edits into retries and edits dropped after the retry cap.
- * @param {Object[]} edits Pending append/retag edits with conflict counts.
+ * @param {Object[]} edits Pending sessions-log or focusd.json edits with conflict counts.
  * @returns {{retry: Object[], dropped: Object[]}} New arrays; input objects are copied.
  */
-function retrySessionEdits(edits) {
+function retryConflictedEdits(edits) {
   var retry = []
   var dropped = []
   var list = Array.isArray(edits) ? edits : []
@@ -702,28 +703,48 @@ function retrySessionEdits(edits) {
     var marked = {}
     for (var key in list[i]) marked[key] = list[i][key]
     marked.conflicts = (Number(list[i].conflicts) || 0) + 1
-    if (marked.conflicts < SESSION_EDIT_MAX_CONFLICTS) retry.push(marked)
+    if (marked.conflicts < EDIT_MAX_CONFLICTS) retry.push(marked)
     else dropped.push(marked)
   }
   return { retry: retry, dropped: dropped }
 }
 
-
-// ---- Rounds setting (GUI) ----
-// Set one key in a JSON settings file. Parses the text (an empty or
-// invalid file starts fresh with just this key) and returns the JSON,
-// 2-space indented so a hand-edited file stays readable. All other
-// keys are kept as-is. Used by the panel's Rounds slider to write the
-// `rounds` limit back to focusd.json.
-function setJsonKey(text, key, value) {
-  var obj = {}
-  var raw = String(text || "").trim()
-  if (raw) {
-    try { obj = JSON.parse(raw) || {} } catch (e) { obj = {} }
+/**
+ * Applies queued focusd.json key writes to a fresh read of the file, without I/O.
+ * The panel never writes focusd.json from its in-memory copy: a key or value
+ * removed or changed by hand since the last poll (focusLogPath, the export
+ * destination, above all) would be written back. Each edit sets one key on the
+ * text just read; every other key is exactly what the file holds now.
+ * @param {string} freshText focusd.json text as read from disk ("" for no file).
+ * @param {Object[]} edits `{key, value}` writes in the order the panel made them.
+ * @returns {{text: string}|{skip: string}} The text to write (freshText itself
+ *   when no edit changes a value), or why no write is safe.
+ */
+function applyConfigEdits(freshText, edits) {
+  if (!configTextOk(freshText)) return { skip: "the file is not a valid JSON object" }
+  var raw = String(freshText || "").trim()
+  var obj = raw ? JSON.parse(raw) : {}
+  var changed = false
+  var list = Array.isArray(edits) ? edits : []
+  for (var i = 0; i < list.length; i++) {
+    var key = String(list[i].key)
+    if (JSON.stringify(obj[key]) === JSON.stringify(list[i].value)) continue
+    obj[key] = list[i].value
+    changed = true
   }
-  if (!obj || typeof obj !== "object" || Array.isArray(obj)) obj = {}
-  obj[String(key)] = value
-  return JSON.stringify(obj, null, 2) + "\n"
+  if (!changed) return { text: String(freshText || "") }
+  return { text: JSON.stringify(obj, null, 2) + "\n" }
+}
+
+/**
+ * Describes a dropped focusd.json key write without including file contents.
+ * @param {string} configPath Path of focusd.json.
+ * @param {Object} edit The `{key, value}` write that was dropped.
+ * @param {string} reason Short reason the write could not be applied.
+ * @returns {string} Warning text suitable for the shell log.
+ */
+function configEditSkipMessage(configPath, edit, reason) {
+  return "Focusd: setting " + String(edit && edit.key) + " not saved to " + String(configPath || "") + ": " + String(reason || "unknown reason") + ", nothing written"
 }
 
 // ---- Config write guard ----

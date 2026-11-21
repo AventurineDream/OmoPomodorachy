@@ -306,19 +306,28 @@ Item {
     writeWatchdog.restart();
   }
 
+  // Ask for the Focus Log export. Only applySessionBatch calls this, after
+  // an edit was applied to a fresh read of the sessions log. The export runs
+  // once focusd.json has been read again (loadConfig, applyConfigRead), so it
+  // goes to the focusLogPath the file holds at that moment: a destination
+  // removed or changed by hand since the last 10s poll gets nothing.
+  function writeFocusLog() {
+    root.focusLogExportPending = true;
+    root.runConfigEdits();
+  }
+
   // Rewrite the Focus Log export from sessionsRaw, the sessions log as the
-  // last applied edit or read left it. Only applySessionBatch calls this,
-  // after an edit was applied to a fresh read, so the export never comes
-  // from an unread view. The whole export is regenerated each time (never
-  // appended), so a retag updates the row. Nothing is written while the log
-  // is unloaded or the sync is off, and
+  // last applied edit or read left it. Only applyConfigRead calls this, for
+  // an export requested before its read started. The whole export is
+  // regenerated each time (never appended), so a retag updates the row.
+  // Nothing is written while the log is unloaded or the sync is off, and
   // an existing file is only replaced when it starts with the generated
   // header, so a hand-written file at that path is left alone. The
   // format follows the path's extension: .csv writes CSV, anything else
   // writes the Markdown table. The path may point anywhere, not only
   // the vault. The write is queued (queueWrite); its exit code tells a
   // guard skip (FOCUS_LOG_GUARD_SKIP_EXIT, 2) from a failed write.
-  function writeFocusLog() {
+  function exportFocusLog() {
     if (!root.focusLogPath || !root.sessionsLoadedOk)
       return;
     var text = Model.focusLogFormat(root.focusLogPath) === "csv"
@@ -360,6 +369,11 @@ Item {
   // refuses to write while this is false: a failed read or an invalid
   // file parses to {}, and writing from that would wipe the other keys.
   property bool configOk: false
+  // focusd.json key writes waiting for a fresh read of the file
+  // (writeFocusdJson), and whether a Focus Log export waits for one
+  // (writeFocusLog).
+  property var configEdits: []
+  property bool focusLogExportPending: false
 
   function killProc(proc) {
     try {
@@ -369,16 +383,79 @@ Item {
     proc.running = false;
   }
 
+  // Reads focusd.json. Every read takes the key writes queued before it
+  // starts (configEdits) and any pending Focus Log export request as its
+  // batch, so both act on what the file holds now, not on the last poll
+  // (see applyConfigRead). It waits out a read or a focusd.json write already
+  // running; their exits start it again while work is queued.
   function loadConfig() {
     if (configProc.running || root.writePending(root.focusdJsonPath))
       return;
-    configProc.collected = "";
-    configProc.collectedBytes = 0;
+    configProc.batch = root.configEdits;
+    root.configEdits = [];
+    configProc.exportAfter = root.focusLogExportPending;
+    root.focusLogExportPending = false;
+    configProc.stderrBytes = 0;
     configProc.overflowed = false;
     configProc.timedOut = false;
     configProc.command = ["bash", root.readScriptPath, root.focusdJsonPath, String(root.maxConfigBytes)];
     configWatchdog.restart();
     configProc.running = true;
+  }
+
+  // Starts a fresh focusd.json read when key writes or an export wait on one.
+  function runConfigEdits() {
+    if (root.configEdits.length > 0 || root.focusLogExportPending)
+      root.loadConfig();
+  }
+
+  // Handles one focusd.json read with the batch it took (loadConfig). The
+  // batch's key writes are applied to the text just read and written back
+  // guarded (write-config --expect) against that text, so a key removed or
+  // changed by hand since the last poll is never written back from memory,
+  // and a hand edit landing after the read makes the write conflict and retry
+  // from a fresh read. A failed read, or a file that is not a JSON object,
+  // drops the writes with a warning. A waiting Focus Log export runs after the
+  // config is applied, so it goes to the focusLogPath the file holds now (none
+  // when the read failed).
+  function applyConfigRead(ok, raw, batch, exportAfter) {
+    var text = ok ? String(raw || "") : "";
+    var written = text;
+    if (batch.length > 0) {
+      var result = ok ? Model.applyConfigEdits(text, batch) : { skip: "could not read the file" };
+      if (result.skip) {
+        for (var i = 0; i < batch.length; i++)
+          console.warn(Model.configEditSkipMessage(root.focusdJsonPath, batch[i], result.skip));
+      } else if (result.text !== text) {
+        written = result.text;
+        root.queueConfigWrite(text, written, batch);
+      }
+    }
+    // Writes queued while this read ran are not on disk yet: show them on
+    // top of it so the panel does not snap back until their own read.
+    var shown = Model.applyConfigEdits(written, root.configEdits);
+    root.applyConfig(ok, shown.skip ? written : shown.text);
+    if (exportAfter)
+      root.exportFocusLog();
+    root.runConfigEdits();
+  }
+
+  // Writes focusd.json guarded against base, the text the edits were applied
+  // to. On a conflict (FILE_CHANGED_EXIT) nothing is written and the edits go
+  // back to the front of the queue for a fresh read, up to EDIT_MAX_CONFLICTS.
+  function queueConfigWrite(base, text, edits) {
+    var path = root.focusdJsonPath;
+    root.queueFramedWrite(path, ["bash", root.writeScriptPath, "--create", "--expect", path], Model.writeConfigGuardedInput(base, text), function (ok, exitCode, timedOut) {
+      if (!ok && !timedOut && exitCode === Model.FILE_CHANGED_EXIT) {
+        var r = Model.retryConflictedEdits(edits);
+        for (var i = 0; i < r.dropped.length; i++)
+          console.warn(Model.configEditSkipMessage(path, r.dropped[i], "the file kept changing, gave up after " + Model.EDIT_MAX_CONFLICTS + " conflicts"));
+        root.configEdits = r.retry.concat(root.configEdits);
+      } else if (!ok) {
+        console.warn("Focusd: focusd.json write failed for " + path + " (" + (timedOut ? "timed out" : "exit " + exitCode) + ")");
+      }
+      root.runConfigEdits();
+    });
   }
 
   function applyConfig(ok, raw) {
@@ -420,14 +497,14 @@ Item {
     root.patternsRaw = String(raw || "");
   }
 
-  // Write one key of focusd.json, from the last-read config so the
-  // other keys are kept. Refused while the last read failed or the file
-  // is invalid (configOk false — the cached config is {} then, and
-  // writing from it would wipe the other keys). The cached config is
-  // updated with the new value so a second write compares against the
-  // value just written. The 10s poll re-reads the file and confirms the
-  // write; if it failed, the panel snaps back to the file's value.
-  // Returns false when the write was refused or nothing changed.
+  // Write one key of focusd.json. The key is queued (configEdits) and set
+  // on a fresh read of the file, never on this in-memory copy, so a key the
+  // user removed or changed by hand since the last poll — focusLogPath, the
+  // export destination, above all — is never written back (applyConfigRead).
+  // Refused while the last read failed or the file is invalid (configOk
+  // false); the fresh read checks the file again before writing. The cached
+  // config takes the new value at once so a second write compares against
+  // it. Returns false when the write was refused or nothing changed.
   function writeFocusdJson(key, value) {
     if (!root.configOk)
       return false;
@@ -435,17 +512,15 @@ Item {
     if (JSON.stringify(cfg[key]) === JSON.stringify(value))
       return false;
     cfg[key] = value;
-    var updated = Model.setJsonKey(JSON.stringify(cfg), key, value);
-    root.configRaw = updated;
     root.fileConfig = cfg;
-    root.queueWrite(root.focusdJsonPath, ["bash", root.writeScriptPath, "--create", root.focusdJsonPath], updated);
+    root.configEdits.push({ key: key, value: value });
+    root.runConfigEdits();
     return true;
   }
 
   // A Rounds slider release writes only the rounds key to focusd.json.
-  // The file is written only by this plugin (and a hand edit), so there
-  // is no programmatic writer to race the way the focusd TUI races
-  // config.toml.
+  // A hand edit can race it; writeFocusdJson's fresh read and guarded
+  // write keep that edit.
   function writeRounds(value) {
     var v = Model.clampRounds(value);
     if (v === null)
@@ -625,8 +700,6 @@ Item {
     onTriggered: {
       if (configProc.running) {
         configProc.timedOut = true;
-        configProc.collected = "";
-        configProc.collectedBytes = 0;
         root.killProc(configProc);
       }
     }
@@ -919,18 +992,18 @@ Item {
   // write (write-config --create --expect). base is the text the edits were
   // applied to (the batch's read) and text is the result: write-config
   // replaces the file only while it still holds base. On a conflict (exit
-  // SESSIONS_CHANGED_EXIT) nothing is written and the edits go back to the
+  // FILE_CHANGED_EXIT) nothing is written and the edits go back to the
   // front of the queue to be applied to a fresh read, up to a limit
-  // (retrySessionEdits). Any other failure is warned about; the next read
+  // (retryConflictedEdits). Any other failure is warned about; the next read
   // shows the disk. onDone(ok), when given, runs once the write has finished,
   // before queued edits resume.
   function queueSessionsWrite(base, text, edits, onDone) {
     var path = root.sessionsPath;
     root.queueFramedWrite(path, ["bash", root.writeScriptPath, "--create", "--expect", path], Model.writeConfigGuardedInput(base, text), function (ok, exitCode, timedOut) {
-      if (!ok && !timedOut && exitCode === Model.SESSIONS_CHANGED_EXIT) {
-        var r = Model.retrySessionEdits(edits);
+      if (!ok && !timedOut && exitCode === Model.FILE_CHANGED_EXIT) {
+        var r = Model.retryConflictedEdits(edits);
         for (var i = 0; i < r.dropped.length; i++)
-          console.warn(Model.sessionEditSkipMessage(path, r.dropped[i], "the file kept changing, gave up after " + Model.SESSION_EDIT_MAX_CONFLICTS + " conflicts"));
+          console.warn(Model.sessionEditSkipMessage(path, r.dropped[i], "the file kept changing, gave up after " + Model.EDIT_MAX_CONFLICTS + " conflicts"));
         for (var k = 0; k < r.retry.length; k++)
           console.warn(Model.sessionEditSkipMessage(path, r.retry[k], "the file changed after it was read, retrying from the file"));
         root.sessionsEdits = r.retry.concat(root.sessionsEdits);
@@ -1088,35 +1161,27 @@ Item {
 
   Process {
     id: configProc
-    property string collected: ""
-    property int collectedBytes: 0
+    property int stderrBytes: 0
     property bool overflowed: false
     property bool timedOut: false
-    stdout: SplitParser {
-      onRead: function (data) {
-        if (configProc.overflowed || configProc.timedOut)
-          return;
-        var chunk = String(data + "\n");
-        if (configProc.collectedBytes + chunk.length > root.maxConfigBytes) {
-          configProc.overflowed = true;
-          configProc.collected = "";
-          configProc.collectedBytes = 0;
-          root.killProc(configProc);
-          return;
-        }
-        configProc.collected += chunk;
-        configProc.collectedBytes += chunk.length;
-      }
+    property var batch: []
+    property bool exportAfter: false
+    // Collected whole, exactly as the file holds it: the guarded write
+    // compares this text byte for byte with the file, and a line splitter
+    // would add a "\n" to a last line that has none. read-config already
+    // caps the output at maxConfigBytes, so stdout needs no overflow check.
+    stdout: StdioCollector {
+      id: configOut
+      waitForEnd: true
     }
     stderr: SplitParser {
       onRead: function (data) {
         if (configProc.overflowed || configProc.timedOut)
           return;
-        configProc.collectedBytes += String(data + "\n").length;
-        if (configProc.collectedBytes > root.maxConfigBytes) {
+        configProc.stderrBytes += String(data + "\n").length;
+        if (configProc.stderrBytes > root.maxConfigBytes) {
           configProc.overflowed = true;
-          configProc.collected = "";
-          configProc.collectedBytes = 0;
+          configProc.stderrBytes = 0;
           root.killProc(configProc);
         }
       }
@@ -1124,12 +1189,15 @@ Item {
     onExited: function (exitCode) {
       configWatchdog.stop();
       var ok = !configProc.overflowed && !configProc.timedOut && exitCode === 0;
-      var output = String(configProc.collected);
-      configProc.collected = "";
-      configProc.collectedBytes = 0;
+      var output = String(configOut.text);
+      var batch = configProc.batch;
+      var exportAfter = configProc.exportAfter;
+      configProc.batch = [];
+      configProc.exportAfter = false;
+      configProc.stderrBytes = 0;
       configProc.overflowed = false;
       configProc.timedOut = false;
-      root.applyConfig(ok, output);
+      root.applyConfigRead(ok, output, batch, exportAfter);
     }
   }
 
