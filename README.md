@@ -1,6 +1,6 @@
 # OmaPomodorchy
 
-An Omarchy bar interface for [Focusd](https://github.com/BibekBhusal0/focusd), the Pomodoro timer. Start and steer focus sessions without leaving the shell, then review the work in Focusd's history, streaks, goals, and statistics. Current version: 1.13.4.
+An Omarchy bar interface for [Focusd](https://github.com/BibekBhusal0/focusd), the Pomodoro timer. Start and steer focus sessions without leaving the shell, then review the work in Focusd's history, streaks, goals, and statistics. Current version: 1.13.5.
 
 Optional integration with [Terminal Breather](https://github.com/AventurineDream/Terminal-Breather) can start a guided breathing session when a break begins.
 
@@ -98,7 +98,7 @@ Choose tags in the panel before or during a work block. The plugin records compl
 
 CSV is selected by a `.csv` extension (for example `/home/aven/focus-log.csv`). The export is off by default; a non-empty existing file is replaced only when it has the plugin's generated-file marker/header. Empty files are treated as interrupted exports and may be replaced, so a failed first write can recover. On block end, the source log is re-read and validated; malformed or over-1-MiB files are preserved and reported instead of being overwritten. Repair the source log before further blocks can be recorded. Do not edit generated export rows by hand, since they are rebuilt from the session history.
 
-To stop or move the export, remove or change `focusLogPath` in `focusd.json`; no reload is needed. The plugin re-reads `focusd.json` before every export and before every settings save, and saves change only the key being set, so a removed or changed destination is never written back and the next export follows the file. A file the plugin already exported to is left as it is.
+To stop or move the export, remove or change `focusLogPath` in `focusd.json`; no reload is needed. The plugin re-reads `focusd.json` before every export and before every settings save, and saves change only the key being set, so a removed or changed destination is never written back and the next export follows the file. An export waiting behind other writes takes its destination when its own write starts, so once the plugin has read the change (at the latest on its 10-second poll), even an export queued earlier goes to the new path, or nowhere when the key was removed. A file the plugin already exported to is left as it is.
 
 ## Uninstall
 

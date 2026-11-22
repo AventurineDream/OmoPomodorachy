@@ -913,6 +913,24 @@ function focusLogCommand(writeScriptPath, focusLogPath) {
 }
 
 /**
+ * Resolves a queued Focus Log export into the write to run now.
+ * @param {string} writeScriptPath Path to the write-config script.
+ * @param {string} focusLogPath The export destination in effect when the write runs; empty when the export is off.
+ * @param {boolean} sessionsLoadedOk Whether the sessions log was last read and validated successfully.
+ * @param {string} sessionsRaw Sessions log text the export is generated from.
+ * @returns {{path: string, command: string[], input: string}|null} Destination, write-config argv and framed stdin; null when nothing must be written (export off, invalid path, or sessions log not loaded).
+ * @remarks Called when the queued job reaches the head of the write queue, not when it is queued, so a destination changed while the job waited gets the export (in its own extension's format) and a removed one gets nothing.
+ */
+function focusLogExportWrite(writeScriptPath, focusLogPath, sessionsLoadedOk, sessionsRaw) {
+  if (!sessionsLoadedOk) return null
+  var path = String(focusLogPath || "")
+  var command = focusLogCommand(writeScriptPath, path)
+  if (!command) return null
+  var text = focusLogFormat(path) === "csv" ? focusLogCsvText(sessionsRaw) : focusLogText(sessionsRaw)
+  return { path: path, command: command, input: writeConfigInput(text) }
+}
+
+/**
  * Encodes a local path as a file URL for Qt.openUrlExternally.
  * @param {string} path Local filesystem path; query and fragment characters are escaped.
  * @returns {string} A `file://` URL; performs no I/O.
