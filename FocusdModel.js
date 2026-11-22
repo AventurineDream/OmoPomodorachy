@@ -896,6 +896,34 @@ function focusLogSkipMessage(focusLogPath) {
     " already exists and is not a generated Focus Log (no generated header), leaving it alone"
 }
 
+// ---- Queued Focus Log exports -------------------------------------------
+// An export is queued with the destination captured at queue time, and the
+// queue drains asynchronously. When focusLogPath changes (or is removed)
+// after queueing, the captured write must not still land at the old path.
+
+/**
+ * Decides whether a queued Focus Log export's captured destination is stale.
+ * @param {string} queuedPath Destination captured when the export was queued.
+ * @param {string} currentPath Destination the last applied focusd.json read holds; empty when the export is off.
+ * @returns {boolean} True when the queued write must not run because the destination changed or was removed after queueing.
+ * @remarks Checked at drain time. A change not yet seen by the config poll is still invisible, as with every focusd.json edit.
+ */
+function focusLogExportStale(queuedPath, currentPath) {
+  return String(queuedPath || "") !== String(currentPath || "")
+}
+
+/**
+ * Message logged when a queued Focus Log export is dropped as stale.
+ * @param {string} queuedPath Destination the skipped write had captured.
+ * @param {string} currentPath Destination in effect now; empty when the export was turned off.
+ * @returns {string} One console.warn line.
+ */
+function focusLogStaleMessage(queuedPath, currentPath) {
+  var now = String(currentPath || "")
+  return "Focus Log write skipped: " + String(queuedPath || "") +
+    " captured a destination that " + (now ? "changed to " + now : "was removed") + " before the write ran"
+}
+
 /**
  * Builds argv for atomically writing a generated Focus Log export.
  * @param {string} writeScriptPath Path to the write-config script.
