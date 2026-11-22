@@ -277,15 +277,17 @@ Item {
   property int writeTimeoutMs: 15000
   property var writeQueue: []
   property var activeWrite: null
-  function queueWrite(path, command, content, onExit) {
-    root.queueFramedWrite(path, command, Model.writeConfigInput(content), onExit);
+  function queueWrite(path, command, content, onExit, focusLog) {
+    root.queueFramedWrite(path, command, Model.writeConfigInput(content), onExit, focusLog);
   }
   // queueWrite for input already framed: Model.writeConfigInput for one
   // frame, Model.writeConfigGuardedInput for the sessions log's guarded pair.
-  function queueFramedWrite(path, command, input, onExit) {
+  // focusLog marks a Focus Log export so drainWrites can re-check its
+  // destination against the current focusLogPath before it runs.
+  function queueFramedWrite(path, command, input, onExit, focusLog) {
     if (path === root.focusdConfigPath)
       root.focusdWriteSeq++;
-    root.writeQueue.push({ path: path, command: command, input: input, onExit: onExit || null, timedOut: false });
+    root.writeQueue.push({ path: path, command: command, input: input, onExit: onExit || null, timedOut: false, focusLog: !!focusLog });
     root.drainWrites();
   }
   function writePending(path) {
@@ -298,12 +300,32 @@ Item {
     return false;
   }
   function drainWrites() {
-    if (configWriteProc.running || root.writeQueue.length === 0)
+    if (configWriteProc.running)
       return;
-    root.activeWrite = root.writeQueue.shift();
-    configWriteProc.command = root.activeWrite.command;
-    configWriteProc.running = true;
-    writeWatchdog.restart();
+    var reexport = false;
+    while (root.writeQueue.length > 0) {
+      var job = root.writeQueue.shift();
+      // A queued Focus Log export carries the destination captured when it
+      // was queued. When the setting changed (or was removed) before the
+      // write runs, skip the write so the captured report never lands at
+      // the old path, and regenerate for the current destination instead.
+      // Skipped when a fresher export to the current path is already
+      // queued or running. A change the 10s config poll has not applied
+      // yet is still invisible here, as with every focusd.json edit.
+      if (job.focusLog && Model.focusLogExportStale(job.path, root.focusLogPath)) {
+        console.warn(Model.focusLogStaleMessage(job.path, root.focusLogPath));
+        if (root.focusLogPath && !root.writePending(root.focusLogPath))
+          reexport = true;
+        continue;
+      }
+      root.activeWrite = job;
+      configWriteProc.command = job.command;
+      configWriteProc.running = true;
+      writeWatchdog.restart();
+      return;
+    }
+    if (reexport)
+      root.writeFocusLog();
   }
 
   // Ask for the Focus Log export. Only applySessionBatch calls this, after
@@ -325,8 +347,10 @@ Item {
   // header, so a hand-written file at that path is left alone. The
   // format follows the path's extension: .csv writes CSV, anything else
   // writes the Markdown table. The path may point anywhere, not only
-  // the vault. The write is queued (queueWrite); its exit code tells a
-  // guard skip (FOCUS_LOG_GUARD_SKIP_EXIT, 2) from a failed write.
+  // the vault. The write is queued (queueWrite) with the focusLog mark,
+  // so drainWrites skips it when the destination changed after queueing;
+  // its exit code tells a guard skip (FOCUS_LOG_GUARD_SKIP_EXIT, 2) from
+  // a failed write.
   function exportFocusLog() {
     if (!root.focusLogPath || !root.sessionsLoadedOk)
       return;
@@ -345,7 +369,7 @@ Item {
         return;
       }
       console.warn("Focusd: Focus Log write failed for " + path + " (" + (timedOut ? "timed out" : "exit " + exitCode) + ")");
-    });
+    }, true);
   }
   property var fileConfig: ({})
   function parseFileConfig(raw) {
