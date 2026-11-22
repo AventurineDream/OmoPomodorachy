@@ -6,7 +6,7 @@ const os = require("os");
 const { execFileSync } = require("child_process");
 const src = fs.readFileSync(path.join(__dirname, "..", "FocusdModel.js"), "utf8");
 const factory = new Function(
-  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, parseOnByDefault, shouldLaunchBreather, breatherPatternOptions, parseBreatherCustomPatterns, DURATION_LIMITS, clampDuration, parseDurations, presetSection, updateDuration, listPresets, setActivePreset, validPresetName, savePresetAs, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, addTag, removeTag, enqueueTag, removeScheduledTag, filterSchedule, shiftSchedule, saveSchedulePreset, loadSchedulePreset, deleteSchedulePreset, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, applyConfigEdits, configEditSkipMessage, configTextOk, FOCUS_LOG_HEADER, FOCUS_LOG_CSV_HEADER, focusLogFormat, focusLogText, focusLogCsvText, focusLogCommand, FOCUS_LOG_GUARD_SKIP_EXIT, focusLogSkipMessage };"
+  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, parseOnByDefault, shouldLaunchBreather, breatherPatternOptions, parseBreatherCustomPatterns, DURATION_LIMITS, clampDuration, parseDurations, presetSection, updateDuration, listPresets, setActivePreset, validPresetName, savePresetAs, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, addTag, removeTag, enqueueTag, removeScheduledTag, filterSchedule, shiftSchedule, saveSchedulePreset, loadSchedulePreset, deleteSchedulePreset, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, applyConfigEdits, configEditSkipMessage, configTextOk, FOCUS_LOG_HEADER, FOCUS_LOG_CSV_HEADER, focusLogFormat, focusLogText, focusLogCsvText, focusLogCommand, focusLogExportJob, focusLogExportWrite, FOCUS_LOG_GUARD_SKIP_EXIT, focusLogSkipMessage };"
 );
 // writeConfigInput: the framed stdin that write-config reads (FocusdModel.js).
 const { writeConfigInput } = new Function(src + "\nreturn { writeConfigInput };")();
@@ -459,6 +459,48 @@ check("focusLogCommand CSV guard: a generated CSV is rewritten (exit 0)", runFoc
 fs.writeFileSync(csvGuardTarget, "Date,Tag,Minutes\n2026-11-11,Work,25\n");
 check("focusLogCommand CSV guard: a hand-written CSV is left alone (exit 2)", runFocusLogCsv(M.focusLogCsvText(SAMPLE_LOG_JSON)) === M.FOCUS_LOG_GUARD_SKIP_EXIT && fs.readFileSync(csvGuardTarget, "utf8") === "Date,Tag,Minutes\n2026-11-11,Work,25\n");
 fs.rmSync(csvGuardDir, { recursive: true, force: true });
+
+// Queued export destination (issue #28, marketplace review #15501 Low): the
+// Service queues an export (focusLogExportJob) with the session data frozen
+// but no destination, and resolves the destination with focusLogExportWrite
+// when the job reaches the head of the write queue. An export queued while
+// focusLogPath was the old file, then drained after a config read changed or
+// removed it, must follow the current setting and leave the old file alone.
+// Each case runs the resolved argv against the stub write-config, the way
+// the Service's write queue would.
+var queuedDir = fs.mkdtempSync(path.join(os.tmpdir(), "focus-log-queued-"));
+var queuedStub = path.join(queuedDir, "write-config");
+fs.writeFileSync(queuedStub, "#!/usr/bin/env bash\nif [ \"$1\" = \"--create\" ]; then shift; fi\nread -r n\nhead -c \"$n\" > \"$1\"\n");
+fs.chmodSync(queuedStub, 0o755);
+var queuedOld = path.join(queuedDir, "old", "Focus Log.md");
+var queuedNew = path.join(queuedDir, "new", "focus-log.csv");
+function drainQueuedExport(currentPath, loaded) {
+  var w = M.focusLogExportWrite(queuedStub, currentPath, M.focusLogExportJob(loaded, SAMPLE_LOG_JSON));
+  if (w)
+    require("child_process").spawnSync(w.command[0], w.command.slice(1), { input: w.input, stdio: ["pipe", "ignore", "ignore"] });
+  return w;
+}
+var queuedMoved = drainQueuedExport(queuedNew, true);
+check("queued export: a destination changed before the write runs gets the export, the old one nothing", queuedMoved !== null && queuedMoved.path === queuedNew && queuedMoved.command[4] === queuedNew && fs.readFileSync(queuedNew, "utf8") === M.focusLogCsvText(SAMPLE_LOG_JSON) && !fs.existsSync(queuedOld));
+check("queued export: the format follows the current destination's extension", queuedMoved.input === writeConfigInput(M.focusLogCsvText(SAMPLE_LOG_JSON)) && M.focusLogExportWrite(queuedStub, queuedOld, M.focusLogExportJob(true, SAMPLE_LOG_JSON)).input === writeConfigInput(M.focusLogText(SAMPLE_LOG_JSON)));
+check("queued export: a destination removed before the write runs writes nothing", drainQueuedExport("", true) === null && !fs.existsSync(queuedOld));
+check("queued export: a relative destination writes nothing", drainQueuedExport("Focus Log.md", true) === null);
+check("queued export: nothing is written while the sessions log is not loaded", drainQueuedExport(queuedOld, false) === null && !fs.existsSync(queuedOld));
+check("queued export: an unchanged destination is written as before", drainQueuedExport(queuedOld, true) !== null && fs.readFileSync(queuedOld, "utf8") === M.focusLogText(SAMPLE_LOG_JSON));
+// Review of PR #29: applySessionBatch shows an edit in sessionsRaw before its
+// sessions write lands, and that write queues behind an export already
+// waiting. The export must carry the data from when it was queued, so an
+// edit whose save is still pending, or then fails, never reaches the export.
+// The state object stands in for the Service's properties.
+fs.rmSync(queuedOld, { force: true });
+var queuedState = { focusLogPath: queuedOld, sessionsLoadedOk: true, sessionsRaw: SAMPLE_LOG_JSON };
+var queuedJob = M.focusLogExportJob(queuedState.sessionsLoadedOk, queuedState.sessionsRaw);
+queuedState.sessionsRaw = '[{"date":"2026-11-11","tag":"Work","minutes":25},{"date":"2026-11-11","tag":"Art","minutes":15},{"date":"2026-11-12","tag":"Unsaved","minutes":50}]';
+var queuedFrozen = M.focusLogExportWrite(queuedStub, queuedState.focusLogPath, queuedJob);
+if (queuedFrozen)
+  require("child_process").spawnSync(queuedFrozen.command[0], queuedFrozen.command.slice(1), { input: queuedFrozen.input, stdio: ["pipe", "ignore", "ignore"] });
+check("queued export: an export queued before a pending or failed sessions save writes the queue-time data, not the unsaved edit", queuedFrozen !== null && fs.existsSync(queuedOld) && fs.readFileSync(queuedOld, "utf8") === M.focusLogText(SAMPLE_LOG_JSON) && fs.readFileSync(queuedOld, "utf8").indexOf("Unsaved") === -1 && M.focusLogText(queuedState.sessionsRaw).indexOf("Unsaved") !== -1);
+fs.rmSync(queuedDir, { recursive: true, force: true });
 
 // --- Presets: list, switch, save as ---
 var PRESET_TOML = 'active_preset = "pomodoro"\n\n[presets.pomodoro]\nwork_minutes = 25\nshort_break_minutes = 5\nlong_break_minutes = 15\nsessions_before_long_break = 4\n\n[presets.deep_work]\nwork_minutes = 50\nshort_break_minutes = 10\nlong_break_minutes = 30\nsessions_before_long_break = 4\n';

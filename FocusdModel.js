@@ -913,6 +913,40 @@ function focusLogCommand(writeScriptPath, focusLogPath) {
 }
 
 /**
+ * Builds the write-queue job for a Focus Log export, with the session data frozen.
+ * @param {boolean} sessionsLoadedOk Whether the sessions log was last read and validated successfully, at queue time.
+ * @param {string} sessionsRaw Sessions log text at queue time; the export is generated from this, never from a later state.
+ * @returns {{path: string, command: null, input: string, onExit: null, timedOut: boolean, focusLogExport: boolean, sessionsLoadedOk: boolean, sessionsRaw: string}} A job with no destination yet; focusLogExportWrite fills it in when the job runs.
+ * @remarks The Service shows a session edit (sessionsRaw) before its sessions write lands, and that write queues after an export already waiting. Taking the data at queue time keeps an edit that may still fail or conflict out of an export queued before it.
+ */
+function focusLogExportJob(sessionsLoadedOk, sessionsRaw) {
+  return { path: "", command: null, input: "", onExit: null, timedOut: false, focusLogExport: true,
+    sessionsLoadedOk: !!sessionsLoadedOk, sessionsRaw: String(sessionsRaw || "") }
+}
+
+/** Warning logged when a queued Focus Log export is dropped because focusLogPath was removed while it waited. */
+function focusLogExportDropMessage() {
+  return "Focusd: Focus Log export dropped: focusLogPath was removed from focusd.json before the queued write ran"
+}
+
+/**
+ * Resolves a queued Focus Log export (focusLogExportJob) into the write to run now.
+ * @param {string} writeScriptPath Path to the write-config script.
+ * @param {string} focusLogPath The export destination in effect when the write runs; empty when the export is off.
+ * @param {{sessionsLoadedOk: boolean, sessionsRaw: string}} job The queued export, carrying the session data frozen at queue time.
+ * @returns {{path: string, command: string[], input: string}|null} Destination, write-config argv and framed stdin; null when nothing must be written (export off, invalid path, or sessions log not loaded at queue time).
+ * @remarks Called when the job reaches the head of the write queue. Only the destination is current-at-write: a destination changed while the job waited gets the export (in its own extension's format) and a removed one gets nothing. The content is the job's queue-time snapshot.
+ */
+function focusLogExportWrite(writeScriptPath, focusLogPath, job) {
+  if (!job || !job.sessionsLoadedOk) return null
+  var path = String(focusLogPath || "")
+  var command = focusLogCommand(writeScriptPath, path)
+  if (!command) return null
+  var text = focusLogFormat(path) === "csv" ? focusLogCsvText(job.sessionsRaw) : focusLogText(job.sessionsRaw)
+  return { path: path, command: command, input: writeConfigInput(text) }
+}
+
+/**
  * Encodes a local path as a file URL for Qt.openUrlExternally.
  * @param {string} path Local filesystem path; query and fragment characters are escaped.
  * @returns {string} A `file://` URL; performs no I/O.
