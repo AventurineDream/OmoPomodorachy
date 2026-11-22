@@ -6,7 +6,7 @@ const os = require("os");
 const { execFileSync } = require("child_process");
 const src = fs.readFileSync(path.join(__dirname, "..", "FocusdModel.js"), "utf8");
 const factory = new Function(
-  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, parseOnByDefault, shouldLaunchBreather, breatherPatternOptions, parseBreatherCustomPatterns, DURATION_LIMITS, clampDuration, parseDurations, presetSection, updateDuration, listPresets, setActivePreset, validPresetName, savePresetAs, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, addTag, removeTag, enqueueTag, removeScheduledTag, filterSchedule, shiftSchedule, saveSchedulePreset, loadSchedulePreset, deleteSchedulePreset, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, applyConfigEdits, configEditSkipMessage, configTextOk, FOCUS_LOG_HEADER, FOCUS_LOG_CSV_HEADER, focusLogFormat, focusLogText, focusLogCsvText, focusLogCommand, FOCUS_LOG_GUARD_SKIP_EXIT, focusLogSkipMessage };"
+  src + "\nreturn { FREEDESKTOP_SOUNDS, DEFAULT_SOUND, resolveSoundFile, chimeCommand, sessionEnded, shouldChime, isBreakSession, breatherCommand, parseMinutes, parseOnByDefault, shouldLaunchBreather, breatherPatternOptions, parseBreatherCustomPatterns, DURATION_LIMITS, clampDuration, parseDurations, presetSection, updateDuration, listPresets, setActivePreset, validPresetName, savePresetAs, clampRounds, workSessionEnded, shouldStopAfterRound, DEFAULT_TAGS, parseTags, addTag, removeTag, enqueueTag, removeScheduledTag, filterSchedule, shiftSchedule, saveSchedulePreset, loadSchedulePreset, deleteSchedulePreset, parseSeconds, elapsedMinutes, parseSessionLog, appendSessionLog, retagSessionLog, nextTag, applyConfigEdits, configEditSkipMessage, configTextOk, FOCUS_LOG_HEADER, FOCUS_LOG_CSV_HEADER, focusLogFormat, focusLogText, focusLogCsvText, focusLogCommand, FOCUS_LOG_GUARD_SKIP_EXIT, focusLogSkipMessage, focusLogExportStale, focusLogStaleMessage };"
 );
 // writeConfigInput: the framed stdin that write-config reads (FocusdModel.js).
 const { writeConfigInput } = new Function(src + "\nreturn { writeConfigInput };")();
@@ -387,6 +387,14 @@ check("focusLogCsvText: a tag starting with @ is quote-prefixed", M.focusLogCsvT
 check("focusLogCsvText: a tag starting with a tab is quote-prefixed", M.focusLogCsvText('[{"date":"2026-11-11","tag":"\\tcmd","minutes":25}]').indexOf("'\tcmd") !== -1);
 check("focusLogCsvText: a tag starting with CR is quote-prefixed", M.focusLogCsvText('[{"date":"2026-11-11","tag":"\\rcmd","minutes":25}]').indexOf("'\rcmd") !== -1);
 check("focusLogCsvText: a plain tag is not prefixed", M.focusLogCsvText('[{"date":"2026-11-11","tag":"Work","minutes":25}]').indexOf("2026-11-11,Work,25,") !== -1);
+// Queued-export staleness (marketplace review #15501, Low): an export
+// queued before the destination changed must not write to the old path.
+check("focusLogExportStale: same path is fresh", M.focusLogExportStale("/a/Focus Log.md", "/a/Focus Log.md") === false);
+check("focusLogExportStale: changed destination is stale", M.focusLogExportStale("/a/Focus Log.md", "/b/Focus Log.md") === true);
+check("focusLogExportStale: removed destination is stale", M.focusLogExportStale("/a/Focus Log.md", "") === true);
+check("focusLogExportStale: nothing queued against nothing is fresh", M.focusLogExportStale("", "") === false);
+check("focusLogStaleMessage: names the captured path and the new one", M.focusLogStaleMessage("/a/Focus Log.md", "/b/Focus Log.md").indexOf("/a/Focus Log.md") !== -1 && M.focusLogStaleMessage("/a/Focus Log.md", "/b/Focus Log.md").indexOf("/b/Focus Log.md") !== -1);
+check("focusLogStaleMessage: a removed destination says removed", M.focusLogStaleMessage("/a/Focus Log.md", "").indexOf("was removed") !== -1);
 var FOCUS_CMD = M.focusLogCommand("/x/write-config", "/home/aven/Projects/Obsidian/Aventurine/20_Practices/Focus/Focus Log.md");
 check("focusLogCommand: starts with sh -c", FOCUS_CMD[0] === "sh" && FOCUS_CMD[1] === "-c");
 check("focusLogCommand: mkdirs the parent dir then execs write-config --create", FOCUS_CMD[2].indexOf('mkdir -p "$(dirname "$1")"') !== -1 && FOCUS_CMD[2].indexOf('exec bash "$2" --create "$1"') !== -1);
