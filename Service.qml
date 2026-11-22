@@ -274,8 +274,9 @@ Item {
   // writePending(path) is true while a write to that path is queued or
   // running. The loaders wait for it, so a poll never reads back the
   // file's older text and then writes from it. A Focus Log export is
-  // queued without a destination (exportFocusLog) and resolved when it
-  // reaches the head of the queue (drainWrites).
+  // queued with its session data but no destination (exportFocusLog); the
+  // destination is resolved when it reaches the head of the queue
+  // (drainWrites).
   property int writeTimeoutMs: 15000
   property var writeQueue: []
   property var activeWrite: null
@@ -302,8 +303,8 @@ Item {
     return false;
   }
   // Start the next queued write. A Focus Log export that resolves to nothing
-  // (resolveFocusLogExport) is dropped without a warning, as exportFocusLog
-  // skips one at queue time, and the next job runs instead.
+  // (resolveFocusLogExport) is dropped, with a warning when its destination
+  // was removed while it waited, and the next job runs instead.
   function drainWrites() {
     if (configWriteProc.running)
       return;
@@ -325,40 +326,50 @@ Item {
   // applyConfigRead), and its destination is resolved only when the write
   // runs (drainWrites): once a read has seen a destination removed or changed
   // by hand, the old one gets nothing, even from an export already queued.
+  // Its content is fixed when it is queued (exportFocusLog).
   function writeFocusLog() {
     root.focusLogExportPending = true;
     root.runConfigEdits();
   }
 
   // Queue the Focus Log export. Only applyConfigRead calls this, for an
-  // export requested before its read started. The job carries no
-  // destination or text: resolveFocusLogExport builds both when the job
-  // reaches the head of the write queue, from the focusLogPath and
-  // sessionsRaw in effect then. Writes ahead of it can take up to
-  // writeTimeoutMs each, and a config read in that time may change or remove
-  // the destination; a path captured here would still be written.
+  // export requested before its read started. The job (Model.focusLogExportJob)
+  // snapshots sessionsRaw and sessionsLoadedOk now: a later session edit is
+  // shown in sessionsRaw before its sessions write lands, and that write
+  // queues behind this job, so reading sessionsRaw when the job runs could
+  // export an edit that then fails or conflicts. The job carries no
+  // destination: resolveFocusLogExport takes the focusLogPath in effect when
+  // the job reaches the head of the write queue. Writes ahead of it can take
+  // up to writeTimeoutMs each, and a config read in that time may change or
+  // remove the destination; a path captured here would still be written.
   function exportFocusLog() {
     if (!root.focusLogPath || !root.sessionsLoadedOk)
       return;
-    root.writeQueue.push({ path: "", command: null, input: "", onExit: null, timedOut: false, focusLogExport: true });
+    root.writeQueue.push(Model.focusLogExportJob(root.sessionsLoadedOk, root.sessionsRaw));
     root.drainWrites();
   }
 
   // Resolve a queued export (exportFocusLog) into its write, from the
-  // sessions log as the last applied edit or read left it (sessionsRaw) and
-  // the destination focusd.json held at the last read (focusLogPath). The
+  // sessions log snapshot the job took when it was queued and the
+  // destination focusd.json held at the last read (focusLogPath). The
   // whole export is regenerated each time (never appended), so a retag
-  // updates the row. Nothing is written while the log is unloaded, the sync
-  // is off, or the path is not absolute (returns false), and an existing file
-  // is only replaced when it starts with the generated header, so a
-  // hand-written file at that path is left alone. The format follows the
-  // path's extension: .csv writes CSV, anything else writes the Markdown
-  // table. The path may point anywhere, not only the vault. The exit code
+  // updates the row. Nothing is written when the sync is off or the path is
+  // not absolute (returns false; a destination removed while the job waited
+  // is warned about), and an existing file is only replaced when it starts
+  // with the generated header, so a hand-written file at that path is left
+  // alone. The format follows the path's extension: .csv writes CSV,
+  // anything else writes the Markdown table. The path may point anywhere,
+  // not only the vault. The exit code
   // tells a guard skip (FOCUS_LOG_GUARD_SKIP_EXIT, 2) from a failed write.
   function resolveFocusLogExport(job) {
-    var w = Model.focusLogExportWrite(root.writeScriptPath, root.focusLogPath, root.sessionsLoadedOk, root.sessionsRaw);
-    if (!w)
+    var w = Model.focusLogExportWrite(root.writeScriptPath, root.focusLogPath, job);
+    if (!w) {
+      // exportFocusLog only queues while focusLogPath is set, so an empty one
+      // here means a config read removed it while the job waited.
+      if (!root.focusLogPath)
+        console.warn(Model.focusLogExportDropMessage());
       return false;
+    }
     var path = w.path;
     job.path = path;
     job.command = w.command;
